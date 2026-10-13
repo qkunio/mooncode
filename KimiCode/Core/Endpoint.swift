@@ -38,6 +38,6 @@ enum KimiConfig {
     static let oauthHost = URL(string: "https://auth.kimi.com")!
     /// 与 `KIMI_CODE_FLOW_CONFIG.clientId` 一致（公开的 device-code 客户端）。
     static let oauthClientID = "17e5f671-d194-4dfb-9706-5516cb48c098"
-    /// 「Kimi 订阅」这组模型的 provider id（网页端常量 `gT`）。App 只提供这一组。
+    /// 「Kimi 订阅」的 provider id，用于把这个来源显示成人类可读的名称。
     static let kimiSubscriptionProvider = "managed:kimi-code"
 }

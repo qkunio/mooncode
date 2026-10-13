@@ -15,7 +15,6 @@ struct ComposerView: View {
     @Environment(AppModel.self) private var app
     @FocusState private var isFocused: Bool
     @State private var inputCardHeight: CGFloat = 96
-    @State private var modelPanelHeight: CGFloat = 480
     @State private var pickedPhotos: [PhotosPickerItem] = []
     @State private var isPickingPhotos = false
     @State private var isPickingFiles = false
@@ -107,10 +106,11 @@ struct ComposerView: View {
                 ModelSelectionPanel(models: app.models, config: chat.config, confirm: { model, effort in
                     Task { await chat.setModel(model, effort: effort) }
                     activePanel = nil
-                }, onHeight: { modelPanelHeight = $0 })
-                .presentationDetents([.height(modelPanelHeight)])
+                })
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(32)
+                .task { await app.refreshModels() }
             case .attachment:
                 attachmentPanel
                     .presentationDetents([.height(230)])

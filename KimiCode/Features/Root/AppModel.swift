@@ -148,8 +148,8 @@ final class AppModel {
             handle(error)
         }
         // 下面几项失败不影响主流程。
-        // 只保留「Kimi 订阅」组的模型，顺序沿用服务端返回的。
-        self.models = ((try? await models) ?? []).filter(\.isKimiSubscription)
+        // 保留电脑已配置的全部来源，顺序沿用服务端返回的。
+        self.models = (try? await models) ?? []
         self.defaultModelID = (try? await config)?.defaultModel
         if let value = try? await user { self.user = value }
         reconcileDraft()
@@ -187,6 +187,24 @@ final class AppModel {
     func refreshUsage() async {
         guard let client else { return }
         if let value = try? await client.usage() { usage = value }
+    }
+
+    /// 打开模型面板时更新目录及默认模型，包含电脑上新配置的模型来源。
+    func refreshModels() async {
+        guard let client, let deviceID = endpoint?.deviceID else { return }
+        async let refreshedModels = client.models()
+        async let refreshedDefaults = client.configDefaults()
+        do {
+            let refreshed = try await refreshedModels
+            let defaults = try? await refreshedDefaults
+            guard endpoint?.deviceID == deviceID, !Task.isCancelled else { return }
+            models = refreshed
+            if let defaults { defaultModelID = defaults.defaultModel }
+        } catch {
+            guard endpoint?.deviceID == deviceID, !Task.isCancelled,
+                  !(error is CancellationError), (error as? URLError)?.code != .cancelled else { return }
+            handle(error)
+        }
     }
 
     // MARK: 侧栏分组
@@ -267,6 +285,7 @@ final class AppModel {
             endpoint: endpoint,
             tokenProvider: tokenProvider,
             liveUpdates: !isDemoMode,
+            modelInfo: { [weak self] id in self?.model(withID: id) },
             onSessionCreated: { [weak self] created in
                 self?.sessions.insert(created, at: 0)
             },
@@ -276,19 +295,12 @@ final class AppModel {
         )
     }
 
-    /// 新对话继承上次的选择；第一次用时：权限「完全自动」（服务端默认）、服务端默认模型及其默认思考强度。
-    /// 模型必须在「Kimi 订阅」组里：记住的或服务端默认的不是这组的，就退到这组第一个。
+    /// 新对话继承任意来源的有效选择；没有偏好时使用电脑默认模型及其默认思考强度。
     private var initialComposerConfig: ComposerConfig {
-        if let data = UserDefaults.standard.data(forKey: Self.composerConfigKey),
-           let stored = try? JSONDecoder().decode(ComposerConfig.self, from: data),
-           model(withID: stored.modelID) != nil {
-            return stored
-        }
-        let modelID = model(withID: defaultModelID)?.model ?? models.first?.model
-        return ComposerConfig(
-            permission: .auto,
-            modelID: modelID,
-            effort: model(withID: modelID)?.defaultEffort
+        let stored = UserDefaults.standard.data(forKey: Self.composerConfigKey)
+            .flatMap { try? JSONDecoder().decode(ComposerConfig.self, from: $0) }
+        return ComposerConfig.initial(
+            models: models, defaultModelID: defaultModelID, remembered: stored
         )
     }
 

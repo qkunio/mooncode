@@ -1,17 +1,6 @@
 import Foundation
 import Observation
 
-/// composer 上那一排的选择：权限模式 / 模型 / 思考强度。新会话会继承上一次的选择。
-struct ComposerConfig: Codable, Equatable, Sendable {
-    var permission: PermissionMode
-    var modelID: String?
-    var effort: String?
-
-    var patch: AgentConfigPatch {
-        AgentConfigPatch(model: modelID, thinking: effort, permissionMode: permission)
-    }
-}
-
 /// 主页正在看的那条对话。
 ///
 /// 两种形态：
@@ -76,6 +65,7 @@ final class ChatModel {
     private let tokenProvider: @Sendable () async -> String?
     /// 是否开 WS 事件流。体验模式的内存后端没有事件流，一轮还在跑时改成轮询。
     private let liveUpdates: Bool
+    private let modelInfo: (String?) -> ModelInfo?
     private let onSessionCreated: (SessionSummary) -> Void
     private let onConfigChanged: (ComposerConfig) -> Void
 
@@ -106,6 +96,7 @@ final class ChatModel {
         endpoint: Endpoint,
         tokenProvider: @escaping @Sendable () async -> String?,
         liveUpdates: Bool,
+        modelInfo: @escaping (String?) -> ModelInfo?,
         onSessionCreated: @escaping (SessionSummary) -> Void,
         onConfigChanged: @escaping (ComposerConfig) -> Void
     ) {
@@ -116,6 +107,7 @@ final class ChatModel {
         self.endpoint = endpoint
         self.tokenProvider = tokenProvider
         self.liveUpdates = liveUpdates
+        self.modelInfo = modelInfo
         self.onSessionCreated = onSessionCreated
         self.onConfigChanged = onConfigChanged
     }
@@ -281,6 +273,7 @@ final class ChatModel {
             modelID: status.model.nonEmpty ?? config.modelID,
             effort: status.thinkingLevel.nonEmpty ?? config.effort
         )
+        normalizeEffort()
     }
 
     /// `meta.agent` 里带着模型、思考强度、权限和上下文用量，随正文一起推过来。
@@ -297,6 +290,12 @@ final class ChatModel {
         if let model = agent["model"]?.stringValue, !model.isEmpty { next.modelID = model }
         if let effort = agent["thinkingEffort"]?.stringValue, !effort.isEmpty { next.effort = effort }
         if next != config { config = next }
+        normalizeEffort()
+    }
+
+    private func normalizeEffort() {
+        guard let model = modelInfo(config.modelID) else { return }
+        config.effort = model.resolvedEffort(config.effort)
     }
 
     private func rebuild() {
@@ -344,7 +343,7 @@ final class ChatModel {
     func setModel(_ model: ModelInfo, effort: String?) async {
         await update {
             $0.modelID = model.model
-            $0.effort = effort
+            $0.effort = model.resolvedEffort(effort)
         }
     }
 
@@ -354,12 +353,15 @@ final class ChatModel {
         change(&next)
         guard next != previous else { return }
         config = next
-        onConfigChanged(next)
         // 草稿还没有会话，等第一条消息时连同配置一起建。
-        guard let sessionID else { return }
+        guard let sessionID else {
+            onConfigChanged(next)
+            return
+        }
         do {
             try await client.updateProfile(sessionID, agentConfig: diff(from: previous, to: next))
             if let status = try? await client.status(sessionID) { apply(status) }
+            onConfigChanged(config)
         } catch {
             config = previous
             errorMessage = error.localizedDescription
@@ -381,6 +383,15 @@ final class ChatModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let pending = attachments
         guard !trimmed.isEmpty || !pending.isEmpty, !isWorking else { return }
+        // 目录在面板打开时可能更新；关闭面板后发送仍要符合最新档位能力。
+        normalizeEffort()
+        if let model = modelInfo(config.modelID), !model.acceptsImages,
+           pending.contains(where: { if case .image = $0 { true } else { false } }) {
+            // 图片可能是在切换模型之前选的；保留附件和输入，不向不支持图片的模型提交。
+            restoredDraft = trimmed
+            errorMessage = "\(model.name)不支持图片，请移除图片或切换模型。"
+            return
+        }
 
         let optimistic = OptimisticPrompt(text: trimmed, attachmentCount: pending.count)
         optimisticPrompts.append(optimistic)

@@ -86,13 +86,17 @@ xcodebuild -project KimiCode.xcodeproj -scheme KimiCode -sdk iphonesimulator \
 |---|---|
 | **+** | 加图片或文件一起发 |
 | **⚡︎ 图标** | 权限模式。`hand.raised` = 始终询问，`checkmark.shield` = 必要时询问，`bolt.shield` = 完全自动 |
-| **K3·Low** | 模型和思考强度，点开切换（只列 Kimi 官方订阅的模型） |
+| **K3·Low** | 模型和思考强度，点开切换；显示电脑上已配置的全部来源，可按来源筛选或搜索 |
 | **↑** | 发送。任务在跑的时候它变成 **■**，点一下就是中断 |
 
 任务执行时正文里会实时长出内容：思考过程、读了哪些文件、跑了哪些命令，连续的操作会折叠成
 「已工作 X 分钟」一行，点开能看全。
 
 右上角的 **⋯** 里是这个会话的上下文占用，以及你账号的**剩余用量**（5 小时 / 每周 / 每月，有哪项显示哪项）。
+
+模型与来源沿用电脑上的 Kimi Code 配置，打开模型面板时会刷新列表。新对话继承上次仍可用的模型，
+第一次使用时采用电脑的默认模型；各模型的思考档位和图片支持也按电脑返回的能力显示。
+添加来源和配置 API 密钥仍在电脑上完成，手机不需要填写这些密钥。
 
 ### 侧栏
 
@@ -167,3 +171,11 @@ xcodebuild -project KimiCode.xcodeproj -scheme KimiCode -sdk iphonesimulator \
 
 实现细节、上游协议调研、架构决定都在 [`CLAUDE.md`](CLAUDE.md)；
 REST / WebSocket 的接口规范在 [`reference/`](reference/)。
+
+模型选择的命令行回归检查（只运行本地体验后端，不登录、不访问真实设备）：
+
+```bash
+bash scripts/check-model-selection.sh
+```
+
+该检查使用 Swift 6 编译实际的目录、配置和会话逻辑；iOS 登录与界面仍需用 Xcode 在模拟器或真机验证。
