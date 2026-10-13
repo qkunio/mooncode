@@ -32,9 +32,11 @@ struct UserEntry: Sendable {
     var undoCount: Int?
 }
 
-struct AttachmentRef: Sendable, Hashable {
+struct AttachmentRef: Identifiable, Sendable, Hashable {
+    let id: String
     let name: String
     let isImage: Bool
+    let source: AttachmentSource?
 }
 
 struct CompactionEntry: Sendable {
@@ -477,8 +479,10 @@ enum ConversationBuilder {
     static func attachmentRef(_ attachment: TranscriptAttachment) -> AttachmentRef {
         let type = attachment.mediaType ?? ""
         return AttachmentRef(
+            id: attachment.attachmentId,
             name: attachment.name ?? attachment.attachmentId,
-            isImage: type.hasPrefix("image/") || type == "image/*"
+            isImage: type.hasPrefix("image/") || type == "image/*",
+            source: AttachmentSource(attachment.source)
         )
     }
 

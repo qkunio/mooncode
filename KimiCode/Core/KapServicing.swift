@@ -27,6 +27,7 @@ protocol KapServicing: Sendable {
     // 发任务 / 打断
     func sendPrompt(_ body: PromptBody, to sessionID: String) async throws -> PromptAccepted
     func uploadFile(_ data: Data, name: String, mediaType: String) async throws -> UploadedFile
+    func attachmentData(_ source: AttachmentSource, sessionID: String) async throws -> Data
     func abort(_ sessionID: String) async throws
 
     // 权限确认 / 提问
@@ -40,6 +41,10 @@ protocol KapServicing: Sendable {
 extension KapClient: KapServicing {}
 
 extension KapServicing {
+    func attachmentData(_ source: AttachmentSource, sessionID: String) async throws -> Data {
+        throw KapError.api(code: -1, message: "图片暂时无法预览。")
+    }
+
     func sessions() async throws -> SessionList {
         try await sessions(pageSize: 100)
     }

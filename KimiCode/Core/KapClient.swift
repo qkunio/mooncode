@@ -142,6 +142,9 @@ struct KapClient: Sendable {
     /// 上传附件：multipart `file` + `name`，与网页端 `uploadFile` 一致。
     /// 走隧道的 HTTP 单请求上限 10 MiB，调用方先挡掉过大的文件。
     func uploadFile(_ data: Data, name: String, mediaType: String) async throws -> UploadedFile {
+        guard data.count <= Attachment.maxUploadBytes else {
+            throw KapError.api(code: -1, message: "「\(name)」超过 9 MB，远程控制传不了这么大的附件。")
+        }
         let boundary = "kimi-\(UUID().uuidString)"
         var body = Data()
         func append(_ string: String) { body.append(Data(string.utf8)) }
@@ -163,6 +166,60 @@ struct KapClient: Sendable {
         request.timeoutInterval = 60
         let (responseData, response) = try await session.upload(for: request, from: body)
         return try decodeEnvelope(responseData, status: (response as? HTTPURLResponse)?.statusCode ?? 0, path: "files")
+    }
+
+    /// 读取图片；会话媒体和上传文件需要当前登录凭证。
+    func attachmentData(_ source: AttachmentSource, sessionID: String) async throws -> Data {
+        let url: URL
+        let authenticated: Bool
+        switch source {
+        case let .file(id):
+            url = endpoint.apiBaseURL.appending(path: "files").appendingPathComponent(id)
+            authenticated = true
+        case let .sessionMedia(id):
+            url = endpoint.apiBaseURL.appending(path: "sessions").appendingPathComponent(sessionID)
+                .appending(path: "media").appendingPathComponent(id)
+            authenticated = true
+        case let .url(value):
+            if value.scheme == "data" {
+                let parts = value.absoluteString.split(separator: ",", maxSplits: 1)
+                guard parts.count == 2, parts[0].hasPrefix("data:image/"), parts[0].hasSuffix(";base64"),
+                      parts[1].utf8.count <= ((Attachment.maxUploadBytes + 2) / 3) * 4,
+                      let data = Data(base64Encoded: String(parts[1])), data.count <= Attachment.maxUploadBytes
+                else { throw KapError.api(code: -1, message: "图片格式不可预览。") }
+                return data
+            }
+            guard value.scheme == "https" || value.scheme == "http" else {
+                throw KapError.api(code: -1, message: "图片地址不可预览。")
+            }
+            url = value
+            // 外部图片地址不携带 Kimi 登录凭证。
+            authenticated = value.scheme == endpoint.baseURL.scheme && value.host == endpoint.baseURL.host
+                && value.port == endpoint.baseURL.port && value.path.hasPrefix(endpoint.apiBaseURL.path + "/")
+        }
+        var request = URLRequest(url: url)
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        if authenticated, let token = await tokenProvider() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let (bytes, response) = try await session.bytes(for: request)
+        // 提前拒绝已知长度的大图；无长度响应也不能先完整下载再检查。
+        defer { bytes.task.cancel() }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw KapError.api(code: -1, message: "图片加载失败，请重试。")
+        }
+        guard response.expectedContentLength <= Attachment.maxUploadBytes else {
+            throw KapError.api(code: -1, message: "图片过大，无法预览。")
+        }
+        var data = Data()
+        data.reserveCapacity(Int(max(0, response.expectedContentLength)))
+        for try await byte in bytes {
+            guard data.count < Attachment.maxUploadBytes else {
+                throw KapError.api(code: -1, message: "图片过大，无法预览。")
+            }
+            data.append(byte)
+        }
+        return data
     }
 
     /// 停止当前 turn（网页端的停止按钮走的就是它）。

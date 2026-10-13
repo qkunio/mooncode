@@ -58,6 +58,7 @@ struct ConversationList: View {
                     UserTurnView(
                         entry: user,
                         canUndo: user.undoCount != nil && !chat.isWorking,
+                        loadAttachment: { try await chat.attachmentData($0) },
                         undo: { confirmUndo(user) }
                     )
                 case let .compaction(compaction):
@@ -200,6 +201,7 @@ private struct LoadOlderRow: View {
 struct UserTurnView: View {
     let entry: UserEntry
     let canUndo: Bool
+    let loadAttachment: @MainActor (AttachmentRef) async throws -> Data
     let undo: () -> Void
 
     @State private var expanded = false
@@ -213,7 +215,7 @@ struct UserTurnView: View {
         VStack(alignment: .trailing, spacing: 6) {
             VStack(alignment: .leading, spacing: 8) {
                 if !entry.attachments.isEmpty {
-                    FlowAttachments(attachments: entry.attachments)
+                    FlowAttachments(attachments: entry.attachments, load: loadAttachment)
                 }
                 if !entry.text.isEmpty {
                     Text(entry.text)
@@ -246,7 +248,13 @@ struct UserTurnView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(Palette.userBubble, in: .rect(cornerRadius: 12))
-            .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in width * 0.88 }
+            .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in
+                let maxWidth = width * 0.88
+                if entry.text.isEmpty, !entry.attachments.isEmpty, entry.attachments.allSatisfy(\.isImage) {
+                    return AttachmentThumbnailLayout.contentWidth(for: entry.attachments.count, in: maxWidth - 24) + 24
+                }
+                return maxWidth
+            }
 
             HStack(spacing: 6) {
                 if !entry.text.isEmpty {
@@ -274,11 +282,20 @@ struct UserTurnView: View {
 
 private struct FlowAttachments: View {
     let attachments: [AttachmentRef]
+    let load: @MainActor (AttachmentRef) async throws -> Data
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(attachments, id: \.self) { attachment in
-                Label(attachment.name, systemImage: attachment.isImage ? "photo" : "doc")
+            let images = attachments.filter(\.isImage)
+            if !images.isEmpty {
+                AttachmentThumbnailLayout {
+                    ForEach(Array(images.enumerated()), id: \.element.id) { index, attachment in
+                        RemoteAttachmentImage(attachment: attachment, number: index + 1, load: load)
+                    }
+                }
+            }
+            ForEach(attachments.filter { !$0.isImage }) { attachment in
+                Label(attachment.name, systemImage: "doc")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -322,11 +339,7 @@ private struct OptimisticPromptRow: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
             VStack(alignment: .leading, spacing: 4) {
-                if prompt.attachmentCount > 0 {
-                    Label("\(prompt.attachmentCount) 个附件", systemImage: "paperclip")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+                LocalAttachmentPreviews(attachments: prompt.attachments)
                 if !prompt.text.isEmpty {
                     Text(prompt.text).lineSpacing(3)
                 }
@@ -335,7 +348,17 @@ private struct OptimisticPromptRow: View {
             .padding(.vertical, 10)
             .background(Palette.userBubble, in: .rect(cornerRadius: 12))
             .opacity(prompt.failed ? 0.6 : 1)
-            .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in width * 0.88 }
+            .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in
+                let maxWidth = width * 0.88
+                let imageOnly = !prompt.attachments.isEmpty && prompt.attachments.allSatisfy {
+                    if case .image = $0 { return true }
+                    return false
+                }
+                if prompt.text.isEmpty, imageOnly {
+                    return AttachmentThumbnailLayout.contentWidth(for: prompt.attachments.count, in: maxWidth - 24) + 24
+                }
+                return maxWidth
+            }
 
             if prompt.failed {
                 HStack(spacing: 12) {
