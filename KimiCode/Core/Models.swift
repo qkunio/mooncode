@@ -397,7 +397,8 @@ struct PromptBody: Encodable, Sendable {
 
     enum Part: Encodable, Sendable {
         case text(String)
-        case jpeg(Data)
+        /// 图片先上传，但仍用 image part 引用，保留模型的识图语义。
+        case image(UploadedFile)
         /// 先 `POST /files` 上传拿到 id，再以 file part 引用（与网页端一致）。
         case file(UploadedFile)
 
@@ -407,12 +408,13 @@ struct PromptBody: Encodable, Sendable {
             case let .text(text):
                 try container.encode("text", forKey: .type)
                 try container.encode(text, forKey: .text)
-            case let .jpeg(data):
+            case let .image(file):
                 try container.encode("image", forKey: .type)
                 try container.encode(
-                    ["kind": "base64", "media_type": "image/jpeg", "data": data.base64EncodedString()],
+                    ["kind": "file", "file_id": file.id],
                     forKey: .source
                 )
+                try container.encode(file.name, forKey: .name)
             case let .file(file):
                 try container.encode("file", forKey: .type)
                 try container.encode(file.id, forKey: .fileID)
@@ -430,8 +432,8 @@ struct PromptBody: Encodable, Sendable {
     }
 
     /// 附件在前、文字在后，与网页端一致。
-    static func make(text: String, images: [Data], files: [UploadedFile], config: AgentConfigPatch) -> Self {
-        var parts = images.map(Part.jpeg) + files.map(Part.file)
+    static func make(text: String, images: [UploadedFile], files: [UploadedFile], config: AgentConfigPatch) -> Self {
+        var parts = images.map(Part.image) + files.map(Part.file)
         if !text.isEmpty { parts.append(.text(text)) }
         // 空串服务端会拒（`thinking: Too small`），没选就不带。
         return .init(
@@ -1120,8 +1122,41 @@ struct PlanUsage: Decodable, Sendable {
 
 // MARK: - 附件
 
-/// composer 里待发送的附件。图片直接 base64 内联；文件发送时先上传。
+/// transcript 的图片来源；历史图片通过会话媒体接口读取。
+enum AttachmentSource: Hashable, Sendable {
+    case file(String)
+    case sessionMedia(String)
+    case url(URL)
+
+    init?(_ value: JSONValue?) {
+        switch value?["kind"]?.stringValue {
+        case "file":
+            guard let id = value?["fileId"]?.stringValue else { return nil }
+            self = .file(id)
+        case "session_media":
+            guard let id = value?["fileId"]?.stringValue else { return nil }
+            self = .sessionMedia(id)
+        case "url":
+            guard let raw = value?["url"]?.stringValue, let url = URL(string: raw) else { return nil }
+            self = .url(url)
+        default: return nil
+        }
+    }
+
+    var cacheKey: String {
+        switch self {
+        case let .file(id): "file:\(id)"
+        case let .sessionMedia(id): "media:\(id)"
+        case let .url(url): "url:\(url.absoluteString)"
+        }
+    }
+}
+
+/// composer 里待发送的附件。图片和文件均在发送时先上传。
 enum Attachment: Identifiable, Sendable {
+    /// 给 multipart 与隧道 HTTP 头留出余量（隧道单请求上限 10 MiB）。
+    static let maxUploadBytes = 9 * 1024 * 1024
+
     case image(id: UUID = UUID(), jpeg: Data, thumbnail: Data)
     case file(id: UUID = UUID(), name: String, mediaType: String, data: Data)
     /// 电脑上会话目录里的文件（文件预览「添加到会话」）：不上传，发送时以 `[名字](路径)` 提及写进正文。

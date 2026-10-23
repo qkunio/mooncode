@@ -66,7 +66,7 @@ enum KapError: LocalizedError {
         case let .http(status, body):
             if status == 401 { return "鉴权失败（401）。登录可能已过期，请重新登录。" }
             if status == 404 { return "找不到该设备或接口（404）。设备可能已下线。" }
-            if status == 502 { return "隧道无法连到那台电脑（502）。确认它醒着且 `kimi rc` 还在跑。" }
+            if status == 502 { return "请求转发失败（502）。请重试；若持续出现，请检查电脑上的 `kimi rc` 连接。" }
             return "HTTP \(status)\(body.isEmpty ? "" : "：\(body.prefix(200))")"
         case let .api(code, message):
             // 这三个都是电脑那边的模型配置问题，不是手机登录过期：别引导重新登录。

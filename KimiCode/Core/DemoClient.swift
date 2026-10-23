@@ -128,7 +128,11 @@ extension DemoClient: KapServicing {
     }
 
     func uploadFile(_ data: Data, name: String, mediaType: String) async throws -> UploadedFile {
-        UploadedFile(id: "demo-file-\(UUID().uuidString)", name: name, mediaType: mediaType, size: data.count)
+        await backend.uploadFile(data, name: name, mediaType: mediaType)
+    }
+
+    func attachmentData(_ source: AttachmentSource, sessionID: String) async throws -> Data {
+        try await backend.attachmentData(source)
     }
 
     func abort(_ sessionID: String) async throws {
@@ -169,11 +173,13 @@ private actor DemoBackend {
     /// 一轮对话：prompt + 若干 frame（frame 是拼好的 JSON 片段，transcript 页也是现拼现解码）。
     fileprivate struct DemoTurn {
         let turnID: String
+        var promptID: String?
         var prompt: String
         var state: String
         var startedAt: Date
         var endedAt: Date?
         var frames: [String] = []
+        var attachments: [TranscriptAttachment] = []
     }
 
     private struct SessionData {
@@ -191,6 +197,23 @@ private actor DemoBackend {
     }
 
     private var states: [String: DeviceState] = [:]
+    private var files: [String: Data] = [:]
+
+    func uploadFile(_ bytes: Data, name: String, mediaType: String) -> UploadedFile {
+        let id = "demo-file-\(UUID().uuidString)"
+        files[id] = bytes
+        return UploadedFile(id: id, name: name, mediaType: mediaType, size: bytes.count)
+    }
+
+    func attachmentData(_ source: AttachmentSource) throws -> Data {
+        let id: String
+        switch source {
+        case let .file(value), let .sessionMedia(value): id = value
+        case .url: throw KapError.api(code: -1, message: "图片不可预览。")
+        }
+        guard let data = files[id] else { throw KapError.api(code: -1, message: "图片不存在。") }
+        return data
+    }
 
     /// 回复延迟这么久出现，让「正在执行…」有机会露出来。
     private static let replyDelay: TimeInterval = 1.2
@@ -245,6 +268,7 @@ private actor DemoBackend {
         }
         return DemoData.page(
             items: data.turns.map(DemoData.render),
+            attachments: data.turns.flatMap(\.attachments),
             meta: DemoData.meta(
                 activity: data.replyReadyAt != nil ? "turn" : "idle",
                 profile: data.profile,
@@ -345,11 +369,24 @@ private actor DemoBackend {
         if let permission = body.permissionMode { data.profile.permission = permission }
 
         let ordinal = data.turns.count + 1
+        let promptID = UUID().uuidString
+        let turnID = "t_\(ordinal)"
+        let attachments = body.content.enumerated().compactMap { index, part -> TranscriptAttachment? in
+            let file: UploadedFile
+            switch part {
+            case let .image(value), let .file(value): file = value
+            case .text: return nil
+            }
+            return TranscriptAttachment(attachmentId: "\(turnID).att\(index)", mediaType: file.mediaType,
+                name: file.name, size: file.size, source: .object(["kind": .string("file"), "fileId": .string(file.id)]))
+        }
         data.turns.append(DemoTurn(
-            turnID: "t_\(ordinal)",
-            prompt: display,
+            turnID: turnID,
+            promptID: promptID,
+            prompt: text,
             state: "running",
-            startedAt: Date()
+            startedAt: Date(),
+            attachments: attachments
         ))
         data.replyReadyAt = Date().addingTimeInterval(Self.replyDelay)
         data.seq += 1
@@ -366,7 +403,7 @@ private actor DemoBackend {
         }
         states[deviceID] = state
         return DemoData.decode("""
-            {"prompt_id":"\(UUID().uuidString)","status":"accepted"}
+            {"prompt_id":"\(promptID)","user_message_id":"\(promptID)","status":"accepted"}
             """)
     }
 
@@ -752,16 +789,28 @@ private enum DemoData {
         let duration = turn.endedAt.map { #","durationMs":\#(Int($0.timeIntervalSince(turn.startedAt) * 1000))"# } ?? ""
         return """
             {"kind":"turn","turnId":"\(turn.turnID)","ordinal":\(Int(turn.turnID.dropFirst(2)) ?? 1),\
+            "triggerPromptId":\(turn.promptID.map(quoted) ?? "null"),\
+            "attachmentIds":[\(turn.attachments.map { quoted($0.attachmentId) }.joined(separator: ","))],\
             "state":"\(turn.state)","prompt":\(quoted(turn.prompt)),\
             "startedAt":"\(iso(turn.startedAt))"\(ended.isEmpty ? "" : "," + ended)\(duration),\
             "steps":\(step)}
             """
     }
 
-    static func page(items: [String], meta: String, seq: Int) -> TranscriptPage {
-        decode("""
+    static func page(items: [String], attachments: [TranscriptAttachment] = [], meta: String, seq: Int) -> TranscriptPage {
+        let media = attachments.map { attachment in
+            let source = attachment.source.flatMap { value in
+                (try? JSONEncoder().encode(value)).flatMap { String(data: $0, encoding: .utf8) }
+            } ?? "null"
+            return """
+            {"attachmentId":\(quoted(attachment.attachmentId)),"mediaType":\(quoted(attachment.mediaType ?? "")),\
+            "name":\(quoted(attachment.name ?? "")),"size":\(attachment.size ?? 0),\
+            "source":\(source)}
+            """
+        }.joined(separator: ",")
+        return decode("""
             {"items":[\(items.joined(separator: ","))],"tasks":[],"interactions":[],\
-            "attachments":[],"prompts":[],"meta":\(meta),"has_more":false,"seq":\(seq)}
+            "attachments":[\(media)],"prompts":[],"meta":\(meta),"has_more":false,"seq":\(seq)}
             """)
     }
 

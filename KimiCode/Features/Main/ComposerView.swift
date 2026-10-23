@@ -29,9 +29,6 @@ struct ComposerView: View {
     }
     private enum AttachmentSource { case photo, file }
 
-    /// 隧道单请求上限 10 MiB，multipart 再加点开销，文件卡在 9 MB。
-    private static let maxFileBytes = 9 * 1024 * 1024
-
     private var currentModel: ModelInfo? { app.model(withID: chat.config.modelID) }
 
     /// 不做排队：本轮在跑时只能停止，不能再发。
@@ -307,7 +304,7 @@ struct ComposerView: View {
 
     // MARK: 图片
 
-    /// 缩到长边 1600px 的 JPEG：隧道单请求上限 10 MiB，base64 还要再膨胀 1/3。
+    /// 缩到长边 1600px 的 JPEG；发送时单独上传，不放进 prompt JSON。
     private func load(_ items: [PhotosPickerItem]) async {
         for item in items {
             guard
@@ -329,7 +326,7 @@ struct ComposerView: View {
                 attachmentError = "读不了「\(url.lastPathComponent)」。"
                 continue
             }
-            guard data.count <= Self.maxFileBytes else {
+            guard data.count <= Attachment.maxUploadBytes else {
                 attachmentError = "「\(url.lastPathComponent)」超过 9 MB，远程控制传不了这么大的文件。"
                 continue
             }

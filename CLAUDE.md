@@ -74,9 +74,23 @@ diff/文件卡片、看子 agent 与 task 面板、终端流）。
 | 模型菜单 | `GET /models` 全部列出，按 provider 分组（`managed:kimi-code` 组名「Kimi 订阅」排最前，其他照原 id 显示，同网页端） | 面板左上 ✕、右上 ⚙︎，点选即生效（无「完成」）；面板只放模型：provider 分组名（Kimi 订阅 / deepseek…）就是一级标题，同用量面板卡片上方的灰色小标题，不再套「模型来源」。composer 上「模型名 High」一个按钮，开 `ModelPanel`（`ThinkingSlider.swift`）：首页两张同样式卡片（标题 + 灰色副标题 + ›）：「当前模型」（模型名 / 来源）、「思考强度」（当前档位 / 全部档位）。点卡片在面板内推入子页（模型列表 / 思考强度），左上角返回；面板高度跟当前页走（各页量高度报给 detent，只有当前页报）。思考强度子页是大号分档滑杆，左低右高、「关闭」最左，拖动吸附、每档轻震、松手才写入；不用弹出菜单（iOS 26 菜单会从整行胶囊变形出来）。拉到最高档轨道变紫、白色小气泡不断向左飘，刚到顶档位名弹一下 + 迸一圈星星 + 重震（彩蛋，减弱动态效果时不动）。拖动位置用 `@GestureState` + `highPriorityGesture`，否则上拉栏抢走手势时滑块会卡在两档中间。⚙︎ 打开「模型配置」（`ProviderSettingsView.swift`）：最上面「默认配置」卡片（摘要「模型 · 权限 · 思考」）→ 默认模型 / 默认权限 / 默认思考三项（照网页端「Agent 默认值」前三项；读 `GET /config` 的 `default_model`、`default_permission_mode`（空=manual）、`thinking{enabled,effort?}`，每改一项 `POST /config` 只带该字段，思考按网页端 `q8`/`bpe` 写）；下面是模型供应商（照网页端「供应商管理」）：`GET /providers` 列表（状态点、左滑刷新 `POST /providers/{id}:refresh` / 删除 `DELETE`，204）；编辑表单模型表来自 `GET /config` 的 `models` 段（驼峰键，只解码这一段），保存 `PUT /providers/{id}`（改名带 `new_id`，key 三态：不带=保留、`""`=清空），手动添加 `POST /providers`（名称 / key / Base URL 必填）；从目录添加 `GET /catalog/providers` → `POST /providers:import_catalog`。Kimi 订阅（`managed:kimi-code`）OAuth 托管只读。注册表导入没做。改完 `AppModel.reloadModels()`。思考选项照网页端 `ov`/`sv`/`z1`：`always_thinking`+强度 → 选强度；只有 `thinking` → 开/关；都没有 → 固定 `off`（见 `ModelInfo.thinkingOptions`） |
 | 改权限 / 模型 / 强度 | `POST /sessions/{id}/profile {agent_config:{permission_mode?, model?, thinking?}}` | 只带改动的字段 |
 | 新对话默认值 | 上次的选择（UserDefaults）；第一次：`auto` + `GET /config` 的 `default_model` + 该模型默认思考（`defaultThinking`） | 模型已不在这台电脑上就退到列表第一个。建会话时显式带全，界面显示 == 真实值。电脑上模型凭证有问题时服务端回 40111/40112/40113（HTTP 200 信封），App 提示去电脑上配置，**不登出** |
-| + 菜单：图片 | prompt 的 `{type:"image", source:{kind:"base64", media_type, data}}` | 长边缩到 1600px JPEG（隧道单请求 10 MiB 上限）；模型无 `image_in` 时禁用 |
+| + 菜单：图片 | 先 multipart `POST /files` 上传 JPEG，再发 `{type:"image", source:{kind:"file", file_id}, name}` | 长边缩到 1600px；图片仍是 image part。消息接口 JSON 默认上限 1 MiB，不能按隧道 10 MiB 上限内联 base64；模型无 `image_in` 时禁用 |
 | + 菜单：文件 | 先 multipart `POST /files`（字段 `file`+`name`）→ `{id,name,media_type,size}`，再发 `{type:"file", file_id, name, media_type, size}` | 与网页端 `uploadFile` 同形；选中时读进内存，发送时上传；单文件上限 9 MB |
 | ↑ / ■ | `POST /sessions/{id}/prompts`（每条都带 `model / thinking / permission_mode`，与网页端 `submitPrompt` 同形）；停止 `POST /sessions/{id}:abort {}` | **不做排队**：本轮在跑时只显示 ■，不能再发。也不做斜杠命令 |
+
+发送失败的乐观消息保留原始图片 / 文件供重试；重试不会消耗当前输入框中新添加的附件。
+图片与文件均逐个上传，并在网络层拒绝超过 9 MiB 的单附件，给隧道 HTTP / multipart 开销留出余量。
+`bash scripts/check-attachments.sh` 覆盖多图请求大小、图片与文件混合、上传 / 发消息失败的重试及草稿隔离。
+
+对话图片按 transcript 的 `attachmentId` 区分，保留 `source`，从鉴权的 `/files/{id}` 或
+`/sessions/{sessionId}/media/{fileId}` 读取缩略图并支持点击预览；同名图片不能合并。
+远程气泡只保留缩略图，点击预览才取原图；原始字节使用有成本限额的缓存。
+下载前检查已知响应长度，未知长度最多累计 9 MiB，超限立即取消，不能先完整下载再拒绝。
+聊天气泡缩略图采用 74pt 外框（图片内容 72pt），右下角显示从 1 开始的序号；空间不足按顺序换行。
+纯图片的气泡按缩略图内容收紧，发送中 / 失败消息采用相同布局。
+乐观消息通过提交返回的 `prompt_id` / `user_message_id` 与 turn 的 `triggerPromptId` 核对清理，
+不能用正文相同来确认收到，否则纯图片或重复文字会误判。需处理回显先于 HTTP 响应到达的顺序。
+上述脚本同时覆盖纯图片、重复文字、回显先到、媒体来源解析与同名附件标识。
 
 ---
 
@@ -419,7 +433,7 @@ SIMCTL_CHILD_KIMI_DEBUG_REFRESH_TOKEN="$(python3 -c "import json;print(json.load
 - **停止走 REST `:abort`，不走 WS `abort`** —— 与网页端一致。
 - **草稿会话。** 在文件夹旁点 + 不会立刻建会话，第一条消息发出时才 `POST /sessions`，
   避免空会话污染侧栏。
-- **乐观发送。** 用户消息先本地显示，失败给"重试/丢弃"，成功后由正文里的真实消息顶替（按文本去重）。
+- **乐观发送。** 用户消息先本地显示，失败保留原始附件并给"重试/丢弃"，成功后按提交返回的消息 ID 与 turn 的 `triggerPromptId` 核对，由正文里的真实消息顶替。
 - **正文只订阅主 agent**（`agent_id=main`），子 agent 的留给 task 面板。
 
 ### 下一步（尚未实现）
@@ -430,7 +444,7 @@ SIMCTL_CHILD_KIMI_DEBUG_REFRESH_TOKEN="$(python3 -c "import json;print(json.load
 4. 新建会话的目录选择（`/fs:browse`、`/workspaces`）
 5. 待确认时的本地通知（`UNUserNotificationCenter`）、长任务 Live Activity
 6. 对话流里官方有、这版还没搬的：每轮「N 个文件已修改」（`/file-history/changes`）、Agent / Todo / Plan 等专用工具卡、
-   用户消息里的图片缩略图、代码语法高亮
+   代码语法高亮
 
 ## 7. 参考位置
 

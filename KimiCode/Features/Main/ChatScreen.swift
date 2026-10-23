@@ -37,6 +37,7 @@ struct ChatScreen: View {
         .animation(.smooth(duration: 0.5), value: app.chat == nil)
         // 顶部不显示会话标题。
         .navigationBarTitleDisplayMode(.inline)
+        .attachmentImageGallery()
         .task(id: emptyWorkspaceDeviceID) {
             confirmedEmptyDeviceID = nil
             guard let deviceID = emptyWorkspaceDeviceID else { return }

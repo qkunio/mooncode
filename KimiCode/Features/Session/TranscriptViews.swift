@@ -58,6 +58,7 @@ struct ConversationList: View {
                     UserTurnView(
                         entry: user,
                         canUndo: user.undoCount != nil && !chat.isWorking,
+                        loadAttachment: { try await chat.attachmentData($0) },
                         undo: { confirmUndo(user) }
                     )
                 case let .compaction(compaction):
@@ -82,7 +83,7 @@ struct ConversationList: View {
         }
 
         ForEach(chat.optimisticPrompts) { prompt in
-            OptimisticPromptRow(prompt: prompt) {
+            OptimisticPromptRow(prompt: prompt, loadAttachment: { try await chat.attachmentData($0) }) {
                 Task { await chat.retry(prompt) }
             } discard: {
                 chat.discard(prompt)
@@ -209,6 +210,7 @@ private extension View {
 struct UserTurnView: View {
     let entry: UserEntry
     let canUndo: Bool
+    let loadAttachment: @MainActor (AttachmentRef) async throws -> Data
     let undo: () -> Void
 
     @State private var expanded = false
@@ -227,7 +229,7 @@ struct UserTurnView: View {
         VStack(alignment: .trailing, spacing: 6) {
             VStack(alignment: .leading, spacing: 8) {
                 if !entry.attachments.isEmpty {
-                    FlowAttachments(attachments: entry.attachments)
+                    FlowAttachments(attachments: entry.attachments, load: loadAttachment)
                 }
                 if !entry.text.isEmpty {
                     // 长按可以自由选择（UIKit 排版，见 `SelectableText`）。
@@ -265,7 +267,13 @@ struct UserTurnView: View {
             .userBubble()
             .contentShape(.rect(cornerRadius: Self.bubbleRadius, style: .continuous))
             .onTapGesture { toggleActions() }
-            .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in width * 0.88 }
+            .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in
+                let maxWidth = width * 0.88
+                if entry.text.isEmpty, !entry.attachments.isEmpty, entry.attachments.allSatisfy(\.isImage) {
+                    return AttachmentThumbnailLayout.contentWidth(for: entry.attachments.count, in: maxWidth - 32) + 32
+                }
+                return maxWidth
+            }
 
             if showsActions {
                 actions
@@ -304,12 +312,17 @@ struct UserTurnView: View {
 
 private struct FlowAttachments: View {
     let attachments: [AttachmentRef]
+    let load: @MainActor (AttachmentRef) async throws -> Data
 
     @Environment(\.openFilePreview) private var openFilePreview
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(attachments, id: \.self) { attachment in
+            let images = attachments.filter(\.isImage)
+            if !images.isEmpty {
+                RemoteAttachmentImages(attachments: images, load: load)
+            }
+            ForEach(attachments.filter { !$0.isImage }) { attachment in
                 // 文件提及点一下打开预览。
                 if let entry = attachment.previewEntry, let openFilePreview {
                     Button {
@@ -362,6 +375,7 @@ struct MessageTime: View {
 
 private struct OptimisticPromptRow: View {
     let prompt: ChatModel.OptimisticPrompt
+    let loadAttachment: @MainActor (AttachmentRef) async throws -> Data
     let retry: () -> Void
     let discard: () -> Void
 
@@ -370,20 +384,26 @@ private struct OptimisticPromptRow: View {
         VStack(alignment: .trailing, spacing: 6) {
             VStack(alignment: .leading, spacing: 4) {
                 if !split.mentions.isEmpty {
-                    FlowAttachments(attachments: split.mentions)
+                    FlowAttachments(attachments: split.mentions, load: loadAttachment)
                 }
-                if prompt.attachmentCount > 0 {
-                    Label("\(prompt.attachmentCount) 个附件", systemImage: "paperclip")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+                LocalAttachmentPreviews(attachments: prompt.attachments)
                 if !split.text.isEmpty {
                     Text(split.text).fontWeight(.medium).lineSpacing(3)
                 }
             }
             .userBubble()
             .opacity(prompt.failed ? 0.6 : 1)
-            .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in width * 0.88 }
+            .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in
+                let maxWidth = width * 0.88
+                let imageOnly = !prompt.attachments.isEmpty && prompt.attachments.allSatisfy {
+                    if case .image = $0 { return true }
+                    return false
+                }
+                if prompt.text.isEmpty, imageOnly {
+                    return AttachmentThumbnailLayout.contentWidth(for: prompt.attachments.count, in: maxWidth - 32) + 32
+                }
+                return maxWidth
+            }
 
             if prompt.failed {
                 HStack(spacing: 12) {
