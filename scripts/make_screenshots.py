@@ -25,8 +25,10 @@ SHOTS = {
         ("chat.png", "随时随地 指挥 Agent"),
         ("devices.png", "多台电脑 一手掌握"),
         ("model.png", "多款模型 随心切换"),
+        ("thinking.png", "思考强度 一拉到顶"),
         ("usage.png", "上下文与用量 一目了然"),
-        ("welcome.png", "一行 kimi rc 即可接入"),
+        ("files.png", "项目文件 随手翻看"),
+        ("welcome.png", "桌面端、CLI 都能接入"),
     ],
 }
 SHOTS["ipad"] = SHOTS["iphone"]
@@ -57,6 +59,17 @@ def rounded_mask(size, radius):
     return mask
 
 
+def hide_resize_grip(shot):
+    """iPadOS 26 模拟器截图右下角带窗口缩放把手，用旁边的底色盖掉。"""
+    shot = shot.convert("RGB")
+    w, h = shot.size
+    # 逐行取把手左边的底色往右延，保留输入框阴影的渐变，不留方块
+    draw = ImageDraw.Draw(shot)
+    for y in range(h - 58, h):
+        draw.line((w - 66, y, w, y), fill=shot.getpixel((w - 70, y)))
+    return shot
+
+
 def framed(shot, screen_w, corner, bezel):
     scale = screen_w / shot.width
     screen = shot.convert("RGB").resize((screen_w, round(shot.height * scale)), Image.LANCZOS)
@@ -83,7 +96,10 @@ def compose(kind, raw_dir, out_dir):
         # 苹方最粗就是 Semibold；别用描边假加粗，笔画端头会变圆、发糊
         draw.text((cw / 2, title_y), title, font=title_font, fill=TITLE, anchor="mt")
 
-        device = framed(Image.open(raw_dir / name), spec["screen_w"], spec["corner"], spec["bezel"])
+        shot = Image.open(raw_dir / name)
+        if spec["raw"] == "ipad":
+            shot = hide_resize_grip(shot)
+        device = framed(shot, spec["screen_w"], spec["corner"], spec["bezel"])
         x = (cw - device.width) // 2
         y = title_y + title_font.size + round(ch * 0.045)
         # 阴影
