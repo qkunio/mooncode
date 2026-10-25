@@ -3,25 +3,25 @@
 片子里不出现版本号，只说「更新」。
 
 用法：python3 scripts/make_update_video.py <原始截图目录> [输出目录] [--fps 60] [--only vertical|landscape]
-原始截图目录与 make_screenshots.py 相同，另用 iphone/seq/ 下按操作顺序拍的模拟器截图（见 FLOWS：m1–m5 模型面板、
-f1–f6 文件浏览，体验模式里一步步点过去用 xcrun simctl io <udid> screenshot 拍）。默认输出到 marketing/video/。
+原始截图目录与 make_screenshots.py 相同，另用 iphone/seq/ 下按操作顺序拍的模拟器截图（见 FLOWS：f1–f6 文件浏览，
+体验模式里一步步点过去用 xcrun simctl io <udid> screenshot 拍）。默认输出到 marketing/video/。
 
 分镜（秒）：
-  0.0–2.6   开场：Kimi 小 bot 弹出、眨眼，下面逐字打出「Moon Code 更新啦」（同 App 欢迎页的逐字出现），
-            打完从两个下角喷彩条；bot 往上一跳出画面
-  2.6–6.0   思考强度：大号分档滑杆。手指按住滑块，一档一档推到最右：
-            轨道变紫、气泡往左飘、迸一圈星星（App 里拉到顶档的彩蛋）
-  6.0–11.4  模型面板：手机滑入，手指一步步点：模型名 → 面板首页 → 模型列表 → 切到 K2.5 → 齿轮进模型配置
-            （停在配置页）；标题下的说明跟着每一步换
-  11.4–17.4 文件浏览：同样点过去：文件夹按钮 → 目录 → 进 src → 点 main.ts 预览 → ⋯ 菜单 → 添加到会话，
-            文件卡片出现在输入框
-  17.4–20.4 用量：三张卡片，进度条与百分比一起涨
-  20.4–24.0 长按选字：一段正文，选区逐字拉开，弹出菜单「拷贝 | 添加到会话框 | 搜索网页」，
+  0.0–5.0   第一幕：bot 弹出、逐字打出「Moon Code」；「iOS 唯一原生支持 / Kimi Code 远程控制 App」，「唯一」放大变蓝砸下来、
+            马克笔一笔圈上；两枚麦穗徽章弹出：App Store 软件开发工具最高 #28、用户接近 1000
+  5.0–8.6   第二幕：「Kimi K3」落定，「.1」从上面掉下来挤进去，紫色渐变的「Pro」砸下来，整行一震、冲击波 + 星星；
+            「已支持，手机上一点就能切换」
+  8.6–14.6  文件浏览：手机滑入，手指一步步点：文件夹按钮 → 目录 → 进 src → 点 main.ts 预览 → ⋯ 菜单 → 添加到会话，
+            文件卡片出现在输入框；镜头跟着要点的地方推近，标题下的说明跟着每一步换
+  14.6–17.6 用量：三张卡片，进度条与百分比一起涨
+  17.6–21.2 长按选字：一段正文，选区逐字拉开，弹出菜单「拷贝 | 添加到会话框 | 搜索网页」，
             点「添加到会话框」后选中的字飞进下方输入框
-  24.0–26.8 接入引导：「Kimi Code 桌面端」「Kimi Code CLI」两张卡片，bot 在两张之间来回跳
-  26.8–31.2 细节打磨：bot 当发射台，把胶囊一个个抛上去：转着圈飞到位、落地 Q 弹、迸星星、勾一笔画上，
+  21.2–24.0 接入引导：「Kimi Code 桌面端」「Kimi Code CLI」两张卡片，bot 在两张之间来回跳
+  24.0–27.6 思考强度：大号分档滑杆。手指按住滑块，一档一档推到最右：
+            轨道变紫、气泡往左飘、迸一圈星星（App 里拉到顶档的彩蛋）
+  27.6–32.0 细节打磨：bot 当发射台，把胶囊一个个抛上去：转着圈飞到位、落地 Q 弹、迸星星、勾一笔画上，
             身后光环一圈圈扩散；全部落定后整排起浪，bot 蹦起来
-  31.2–35.2 收尾：bot + 字标，「现已更新」，App Store 卡片「更新」→ 下载圈 → 「打开」，彩条
+  32.0–36.0 收尾：bot + 字标，「现已更新」，App Store 卡片「更新」→ 下载圈 → 「打开」，彩条
 每段之间整屏横推（进来的从右边推入，出去的往左推出）。
 """
 import math
@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from make_header import KIMI, sf  # noqa: E402
 from make_rename_video import (  # noqa: E402
     CARD, CARD_BORDER, CONFETTI, FILL, GRAY, ICON, INK, PAPER, PF_MEDIUM, PF_REGULAR, PF_SEMIBOLD, SYSTEM_BLUE,
-    clamp, ease_in_out, ease_out, ease_out_back, lerp, phase, squircle_icon, with_alpha,
+    app_store_icon, clamp, ease_in_out, ease_out, ease_out_back, lerp, make_badge, phase, squircle_icon, with_alpha,
 )
 from make_screenshots import PINGFANG, framed  # noqa: E402
 
@@ -46,32 +46,25 @@ ASSETS = ROOT / "KimiCode/Assets.xcassets"
 PURPLE = [(79, 69, 230), (140, 92, 245), (168, 84, 247)]
 STAR = (255, 199, 64)
 TRACK = (229, 229, 234)
-DURATION = 35.2
+DURATION = 36.0
 
 # 段落起止（秒）。每段进场 / 出场都是 0.5s 的整屏横推，与相邻段重叠
 SEGMENTS = {
-    "opening": (0.0, 2.6),
-    "thinking": (2.6, 6.0),
-    "models": (6.0, 11.4),
-    "files": (11.4, 17.4),
-    "usage": (17.4, 20.4),
-    "select": (20.4, 24.0),
-    "onboard": (24.0, 26.8),
-    "polish": (26.8, 31.2),
-    "finale": (30.8, DURATION),
+    "opening": (0.0, 5.0),
+    "kimi": (5.0, 8.6),
+    "files": (8.6, 14.6),
+    "usage": (14.6, 17.6),
+    "select": (17.6, 21.2),
+    "onboard": (21.2, 24.0),
+    "thinking": (24.0, 27.6),
+    "polish": (27.6, 32.0),
+    "finale": (32.0, DURATION),
 }
 PUSH = 0.5
 
 # 手机里的操作演示：每步一张模拟器截图（seq/ 下）+ 这一步的说明 + 点哪（设备点坐标，440×956；None = 最后一屏不点）。
 # 每步 STEP 秒：先停一会儿，手指按下 → 涟漪 → 淡入下一屏
 FLOWS = {
-    "models": [
-        ("m1", "点输入框上的模型名", (330, 883)),
-        ("m2", "当前模型、思考强度，一屏看全", (200, 720)),
-        ("m3", "全部模型按来源分组", (110, 763)),
-        ("m4", "点一下就切换，不用「完成」", (389, 615)),
-        ("m5", "齿轮进模型配置：默认值、供应商一页管", None),
-    ],
     "files": [
         ("f1", "点右上角的文件夹", (393, 84)),
         ("f2", "会话目录，一目了然", (120, 549)),
@@ -85,7 +78,6 @@ FLOW_START, STEP = 1.0, 0.8
 
 TITLES = {
     "thinking": ("思考强度，一拉到顶", "大号分档滑杆，拖到哪档就是哪档"),
-    "models": ("模型面板，焕然一新", None),
     "files": ("项目文件，随手翻看", None),
     "usage": ("用量，一目了然", "上下文、5 小时、每月限额都在这"),
     "select": ("长按，随心选字", "想选几个字就选几个字"),
@@ -99,9 +91,13 @@ POLISH = ["思考过程改版", "用户气泡更清爽", "启动小脸动画", "
 # 两种画幅：标题区（中心 x、标题基线 y、对齐方式）、画面区（中心）、矢量元素缩放、手机宽度
 LAYOUTS = {
     "vertical": dict(size=(1080, 1920), title=(0.5, 0.15), align="center", title_size=84, sub_size=40,
-                     visual=(0.5, 0.53), u=1.0, phone_w=600, phone_top=0.255, zoom=1.32, phone_clip=0.205, opening_u=11),
+                     visual=(0.5, 0.53), u=1.0, phone_w=600, phone_top=0.255, zoom=1.32, phone_clip=0.205,
+                     intro=dict(bot_u=7.5, bot_y=0.22, word=116, word_y=0.345, claim=92, claim_y=0.5, claim2_y=0.575,
+                                badge_u=1.25, badge_y=0.64, kimi=150, kimi_y=0.47)),
     "landscape": dict(size=(1920, 1080), title=(0.07, 0.47), align="left", title_size=68, sub_size=34,
-                      visual=(0.71, 0.5), u=0.78, phone_w=420, phone_top=None, zoom=1.2, phone_clip=None, opening_u=9),
+                      visual=(0.71, 0.5), u=0.78, phone_w=420, phone_top=None, zoom=1.2, phone_clip=None,
+                      intro=dict(bot_u=5.6, bot_y=0.13, word=110, word_y=0.29, claim=96, claim_y=0.49, claim2_y=0.585,
+                                 badge_u=1.3, badge_y=0.65, kimi=190, kimi_y=0.47)),
 }
 
 
@@ -138,6 +134,10 @@ def face(canvas, cx, cy, u, eye=1.0, squash=1.0):
         if ew > 0 and eh > 0:
             d.rectangle(((ex - ew) * ss, (ey - eh) * ss, (ex + ew) * ss, (ey + eh) * ss), fill=(255, 255, 255, 255))
     canvas.alpha_composite(down(layer, (lw, lh)), (x0, y0))
+
+
+def ease_in(x):
+    return x ** 3
 
 
 def blink_at(t, period=2.4, offset=0.0):
@@ -261,7 +261,6 @@ class Video:
         self.body_font = pf(38 * u, PF_REGULAR)
         self.label_font = pf(34 * u, PF_MEDIUM)
         self.small_font = pf(28 * u, PF_REGULAR)
-        self.confetti_open = Confetti(self.w, self.h, 3)
         self.confetti_end = Confetti(self.w, self.h, 11)
 
         # 手机：截图套边框（同 App Store 截图的边框）
@@ -402,41 +401,189 @@ class Video:
     # MARK: 各段
 
     def opening(self, canvas, t):
+        """第一幕：bot 弹出、逐字打出字标；「iOS 唯一原生支持」，「唯一」放大变蓝、手绘圈一笔圈上；
+        下面两枚麦穗徽章弹出：App Store 软件开发工具最高 #28、用户接近 1000。"""
         r = self.seg(t, "opening")
         if r is None:
             return
         local, dx = r
-        u = self.spec["opening_u"]
-        cx, cy = self.w / 2 + dx, self.h * 0.42
-        pop = ease_out_back(phase(local, 0.0, 0.35))
-        # 打完字，bot 往上一跳出画面
-        jump = phase(local, 2.15, 2.6)
-        cy -= (self.h * 0.6) * jump ** 2 - 60 * math.sin(math.pi * min(1, jump * 2)) * (1 - jump)
-        if pop > 0.01:
-            face(canvas, cx, cy, u * pop, eye=blink_at(local, 1.3, 0.4), squash=1 + 0.12 * math.sin(local * 9) * math.exp(-local * 3))
-        # 逐字打出，每个字带一下小弹
-        text_a, text_b = "Moon Code", " 更新啦"
-        full = text_a + text_b
-        f_lat = sf(round(92 if self.spec["align"] == "center" else 120), 860)
-        f_cjk = pf(f_lat.size * 0.92)
-        widths = [f_lat.getlength(c) if i < len(text_a) else f_cjk.getlength(c) for i, c in enumerate(full)]
-        total = sum(widths)
-        x = cx - total / 2
-        base = self.h * 0.42 + 16 * u + f_lat.size * 1.25
-        out = ease_in_out(phase(local, 2.25, 2.6))
+        L = self.spec["intro"]
+        cx = self.w / 2 + dx
         d = ImageDraw.Draw(canvas)
-        for i, ch in enumerate(full):
-            ct = 0.45 + i * 0.075
-            p = phase(local, ct, ct + 0.18)
-            if p > 0 and ch != " ":
-                s = ease_out_back(p, 2.6)
-                f = f_lat if i < len(text_a) else f_cjk
-                col = KIMI if i < 4 else INK
-                col = tuple(round(lerp(c, 255, out)) for c in col)
-                fs = f if abs(s - 1) < 0.02 else (sf(max(1, round(f_lat.size * s)), 860) if i < len(text_a) else pf(f_cjk.size * s))
-                d.text((x + widths[i] / 2, base), ch, font=fs, fill=col, anchor="ms")
+
+        # bot + 「Moon Code」逐字弹出
+        bu = L["bot_u"]
+        by = L["bot_y"] * self.h
+        pop = ease_out_back(phase(local, 0.0, 0.35))
+        if pop > 0.01:
+            face(canvas, cx, by, bu * pop, eye=blink_at(local, 1.6, 0.3),
+                 squash=1 + 0.12 * math.sin(local * 9) * math.exp(-local * 3))
+        word = "Moon Code"
+        f_lat = sf(L["word"], 860)
+        widths = [f_lat.getlength(c) for c in word]
+        x = cx - sum(widths) / 2
+        base = L["word_y"] * self.h
+        for i, ch in enumerate(word):
+            ct = 0.3 + i * 0.06
+            q = phase(local, ct, ct + 0.18)
+            if q > 0 and ch != " ":
+                sc = ease_out_back(q, 2.6)
+                fs = f_lat if abs(sc - 1) < 0.02 else sf(max(1, round(L["word"] * sc)), 860)
+                d.text((x + widths[i] / 2, base), ch, font=fs, fill=KIMI if i < 4 else INK, anchor="ms")
             x += widths[i]
-        self.confetti_open.draw(canvas, local - (0.45 + len(full) * 0.075 + 0.1))
+
+        # 「iOS 唯一原生支持」：前后两段淡入上浮，「唯一」砸下来（大一号、蓝色），再一笔圈上
+        size = L["claim"]
+        parts = [("iOS ", pf(size), INK), ("唯一", pf(size * 1.32), KIMI), ("原生支持", pf(size), INK)]
+        # 「唯一」左右多留点空，手绘圈才不会压到旁边的字。先是「iOS 原生支持」并在一起居中，
+        # 「唯一」砸下来时把两边挤开（不留一段空白等它）
+        widths = [f.getlength(txt) + (size * 0.5 if k == 1 else 0) for k, (txt, f, _) in enumerate(parts)]
+        open_ = ease_out_back(phase(local, 1.42, 1.72), 1.5)
+        widths[1] *= open_
+        x = cx - sum(widths) / 2
+        y1 = L["claim_y"] * self.h
+        a1 = ease_out(phase(local, 1.1, 1.5))
+        for k, ((txt, f, col), w) in enumerate(zip(parts, widths)):
+            if k == 1:
+                q = phase(local, 1.45, 1.75)
+                if q > 0:
+                    sc = lerp(2.4, 1.0, ease_out(q)) if q < 1 else 1.0
+                    sc *= 1 + 0.08 * math.exp(-max(0, local - 1.75) * 8) * math.sin(max(0, local - 1.75) * 30)
+                    fs = pf(f.size * sc)
+                    colq = tuple(round(lerp(255, c, clamp(q * 2))) for c in col)
+                    d.text((x + w / 2, y1), txt, font=fs, fill=colq, anchor="ms")
+                    uni = (x, w / max(open_, 0.01), f.size)
+            elif a1 > 0:
+                colq = tuple(round(lerp(255, c, a1)) for c in col)
+                d.text((x + (w - f.getlength(txt)) / 2 if k == 1 else x, y1 + (1 - a1) * 26), txt, font=f, fill=colq,
+                       anchor="ls")
+            x += w
+        # 手绘圈：略歪的椭圆，从左上起笔多绕一点，像马克笔圈出来
+        cq = ease_in_out(phase(local, 1.8, 2.25))
+        if cq > 0 and local >= 1.45:
+            ux, uw, us = uni
+            ecx, ecy = ux + uw / 2, y1 - us * 0.36
+            rx, ry = uw * 0.56, us * 0.66
+            tilt = math.radians(-6)
+            n = 72
+            pts = []
+            for j in range(int(n * cq) + 1):
+                th = math.radians(200) + j / n * math.radians(390)
+                wob = 1 + 0.04 * math.sin(th * 3)
+                ex, ey = rx * wob * math.cos(th), ry * wob * math.sin(th)
+                pts.append((ecx + ex * math.cos(tilt) - ey * math.sin(tilt), ecy + ex * math.sin(tilt) + ey * math.cos(tilt)))
+            if len(pts) > 1:
+                ss = 3
+                layer = Image.new("RGBA", (self.w * ss, self.h * ss), (0, 0, 0, 0))
+                ImageDraw.Draw(layer).line([(px * ss, py * ss) for px, py in pts], fill=STAR + (255,),
+                                           width=round(L["claim"] * 0.07 * ss), joint="curve")
+                canvas.alpha_composite(layer.resize(canvas.size, Image.LANCZOS))
+        a2 = ease_out(phase(local, 1.35, 1.75))
+        if a2 > 0:
+            col = tuple(round(lerp(255, c, a2)) for c in INK)
+            d.text((cx, L["claim2_y"] * self.h + (1 - a2) * 26), "Kimi Code 远程控制 App", font=pf(L["claim"] * 0.72),
+                   fill=col, anchor="ms")
+
+        # 两枚麦穗徽章依次弹出，弹出时迸一圈小星星
+        if not hasattr(self, "_badges"):
+            bu2 = L["badge_u"]
+            self._badges = [
+                make_badge("#28", "软件开发工具 · 最高", app_store_icon(round(31 * bu2)), bu2),
+                make_badge("1000", "用户接近", None, bu2),
+            ]
+        gap = 60 * L["badge_u"]
+        total = sum(b.width for b in self._badges) + gap
+        x = cx - total / 2
+        top = L["badge_y"] * self.h
+        for i, b in enumerate(self._badges):
+            t0 = 2.5 + i * 0.25
+            q = phase(local, t0, t0 + 0.45)
+            if q > 0:
+                sc = max(0.01, ease_out_back(q, 2.2))
+                img = b if abs(sc - 1) < 0.003 else b.resize((max(1, round(b.width * sc)), max(1, round(b.height * sc))), Image.BICUBIC)
+                bcx, bcy = x + b.width / 2, top + b.height / 2
+                canvas.alpha_composite(with_alpha(img, clamp(q * 2.5)), (round(bcx - img.width / 2), round(bcy - img.height / 2)))
+                sq = phase(local, t0 + 0.15, t0 + 0.75)
+                if 0 < sq < 1:
+                    for j in range(10):
+                        ang = j / 10 * 2 * math.pi + i
+                        rr = (b.width * 0.5 + 40 * L["badge_u"]) * ease_out(sq)
+                        star(d, bcx + math.cos(ang) * rr, bcy + math.sin(ang) * rr * 0.55,
+                             (12 if j % 2 else 8) * L["badge_u"] * (1 - sq), STAR if j % 2 else KIMI)
+            x += b.width + gap
+
+    def kimi(self, canvas, t):
+        """第二幕：「Kimi K3」先落定，「.1」从上面掉下来挤进去，「Pro」带紫色渐变砸下来，整行一震、冲击波 + 星星。"""
+        r = self.seg(t, "kimi")
+        if r is None:
+            return
+        local, dx = r
+        L = self.spec["intro"]
+        cx, cy = self.w / 2 + dx, self.h * L["kimi_y"]
+        size = L["kimi"]
+        f = sf(size, 860)
+        d = ImageDraw.Draw(canvas)
+        # 小标签「新模型」
+        la = ease_out(phase(local, 0.2, 0.5))
+        if la > 0:
+            lf = pf(size * 0.24)
+            tw = lf.getlength("新模型")
+            pw, ph = tw + size * 0.36, size * 0.42
+            ly = cy - size * 1.05
+            pill = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+            ImageDraw.Draw(pill).rounded_rectangle((cx - pw / 2, ly - ph / 2, cx + pw / 2, ly + ph / 2), ph / 2,
+                                                   fill=(238, 236, 255, 255))
+            canvas.alpha_composite(with_alpha(pill, la))
+            d.text((cx, ly), "新模型", font=lf, fill=tuple(round(lerp(255, c, la)) for c in PURPLE[1]), anchor="mm")
+
+        w_a, w_b, w_c = f.getlength("Kimi K3"), f.getlength(".1"), f.getlength(" Pro")
+        ins = ease_out_back(phase(local, 0.95, 1.3), 1.6)
+        pro = phase(local, 1.5, 1.72)
+        # 整行宽度随「.1」「Pro」进来逐步撑开，始终居中
+        total = w_a + w_b * clamp(ins) + w_c * ease_out(clamp(pro * 1.4))
+        shake = 0
+        if local > 1.72:
+            shake = 16 * math.exp(-(local - 1.72) * 9) * math.sin((local - 1.72) * 60)
+        x0 = cx - total / 2 + shake
+        base = cy + size * 0.36
+        a = ease_out(phase(local, 0.3, 0.7))
+        d.text((x0, base + (1 - a) * 30), "Kimi K3", font=f, fill=tuple(round(lerp(255, c, a)) for c in INK), anchor="ls")
+        if local >= 0.95:
+            q = phase(local, 0.95, 1.3)
+            y = lerp(base - size * 1.4, base, ease_out_back(q, 1.6)) if q < 1 else base
+            d.text((x0 + w_a, y), ".1", font=f, fill=KIMI, anchor="ls")
+        if pro > 0:
+            # 「Pro」：紫色渐变字，从 2 倍大砸到原位
+            sc = lerp(2.0, 1.0, ease_in(pro))
+            fp = sf(max(1, round(size * sc)), 860)
+            tw = fp.getlength("Pro")
+            mask = Image.new("L", (round(tw + 20), round(size * sc * 1.4)), 0)
+            ImageDraw.Draw(mask).text((10, size * sc * 1.1), "Pro", font=fp, fill=255, anchor="ls")
+            g = gradient(mask.width, mask.height, PURPLE).convert("RGBA")
+            g.putalpha(mask.point(lambda v: round(v * clamp(pro * 3))))
+            px = x0 + w_a + w_b + f.getlength(" ") + f.getlength("Pro") / 2 - mask.width / 2
+            canvas.alpha_composite(g, (round(px), round(base - size * sc * 1.1 + (sc - 1) * size * 0.3)))
+        # 冲击波 + 星星
+        wq = phase(local, 1.72, 2.4)
+        if 0 < wq < 1:
+            ring = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+            rd = ImageDraw.Draw(ring)
+            for k in range(2):
+                qq = clamp(wq * 1.2 - k * 0.2)
+                rad = total * 0.3 + total * 0.5 * ease_out(qq)
+                rd.ellipse((cx - rad, cy - rad * 0.5, cx + rad, cy + rad * 0.5),
+                           outline=PURPLE[2] + (round(140 * (1 - qq)),), width=max(1, round(8 * (1 - qq))))
+            canvas.alpha_composite(ring)
+            for j in range(16):
+                ang = j / 16 * 2 * math.pi + 0.2
+                rr = (total * 0.45 + 160 * self.u * ease_out(wq))
+                star(d, cx + math.cos(ang) * rr, cy + math.sin(ang) * rr * 0.45,
+                     (16 if j % 2 else 10) * self.u * (1 - wq), STAR if j % 3 else PURPLE[2])
+        sa = ease_out(phase(local, 2.0, 2.4))
+        if sa > 0:
+            col = tuple(round(lerp(255, c, sa)) for c in (110, 110, 115))
+            d.text((cx, cy + size * 1.05 + (1 - sa) * 24), "已支持，手机上一点就能切换", font=pf(size * 0.3, PF_REGULAR),
+                   fill=col, anchor="ms")
 
     def thinking(self, canvas, t):
         r = self.seg(t, "thinking")
@@ -534,14 +681,6 @@ class Video:
                 dd.ellipse((c - ring, c - ring, c + ring, c + ring), outline=PURPLE[2] + (round(200 * (1 - up_p)),),
                            width=round(3 * ss))
             canvas.alpha_composite(down(layer, (size, size)), (round(kx - size / 2), round(ty - size / 2)))
-
-    def models(self, canvas, t):
-        r = self.seg(t, "models")
-        if r is None:
-            return
-        local, dx = r
-        self.title(canvas, "models", local, dx)
-        self.flow(canvas, "models", local, dx)
 
     def files(self, canvas, t):
         r = self.seg(t, "files")
@@ -986,7 +1125,7 @@ class Video:
 
     def frame(self, t):
         canvas = Image.new("RGBA", (self.w, self.h), PAPER + (255,))
-        for part in (self.opening, self.thinking, self.models, self.files, self.usage, self.select, self.onboard,
+        for part in (self.opening, self.kimi, self.files, self.usage, self.select, self.onboard, self.thinking,
                      self.polish, self.finale):
             part(canvas, t)
         return canvas.convert("RGB")
