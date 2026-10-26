@@ -1321,9 +1321,12 @@ private struct Breathing: ViewModifier {
     @State private var dim = false
 
     func body(content: Content) -> some View {
+        // 无限往返的动画只套在透明度上。写成 `.animation(_:value:)` 会连位置一起套：
+        // 这行出现时正好被上面新插进来的「思考中」往下推，位置变化也跟着无限往返，整行字上下弹个不停。
         content
-            .opacity(active && dim ? 0.45 : 1)
-            .animation(active ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .default, value: dim)
+            .animation(active ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .default) {
+                $0.opacity(active && dim ? 0.45 : 1)
+            }
             .onAppear { dim = active }
             .onChange(of: active) { _, value in dim = value }
     }
