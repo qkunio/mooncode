@@ -13,6 +13,9 @@ struct MainView: View {
     var body: some View {
         GeometryReader { geometry in
             let sidebarWidth = min(geometry.size.width * 0.84, 380)
+            // 坐标从安全区左边算起。横屏时刘海 / 灵动岛在左边，安全区左边有一截（约 60pt）：
+            // 收起的侧栏只挪开自身宽度的话，最右边那截会停在这里露出来，所以还得再多挪这么多。
+            let leadingInset = geometry.safeAreaInsets.leading
             let progress = openProgress(sidebarWidth: sidebarWidth)
 
             ZStack(alignment: .leading) {
@@ -37,7 +40,7 @@ struct MainView: View {
 
                 SidebarView(close: { setSidebar(open: false) })
                     .frame(width: sidebarWidth)
-                    .offset(x: (progress - 1) * sidebarWidth)
+                    .offset(x: (progress - 1) * (sidebarWidth + leadingInset))
                     .zIndex(2)
             }
             .scrollDisabled(isDraggingSidebar)
