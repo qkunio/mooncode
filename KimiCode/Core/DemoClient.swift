@@ -414,7 +414,7 @@ private actor DemoBackend {
             ),
             DemoData.textFrame(
                 id: "\(turnID).f2",
-                text: "看起来你输入了「\(text)」，很高兴认识你，来和我交流体验吧！"
+                text: DemoData.reply(to: text)
             ),
         ]
         data.turns[index].state = "completed"
@@ -790,4 +790,65 @@ private enum DemoData {
     static func toolFrame(id: String, callID: String, name: String, input: String, output: String) -> String {
         #"{"kind":"tool","frameId":"\#(id)","toolCallId":"\#(callID)","name":"\#(name)","state":"done","input":\#(input),"output":\#(quoted(output))}"#
     }
+}
+
+extension DemoData {
+    static func reply(to text: String) -> String {
+        #if DEBUG
+        // 调试 Markdown / LaTeX 渲染：发「md」回一段样例。
+        if text.lowercased() == "md" { return markdownSample }
+        #endif
+        return "看起来你输入了「\(text)」，很高兴认识你，来和我交流体验吧！"
+    }
+
+    private static let markdownSample = #"""
+## 二次方程
+
+方程 $ax^2 + bx + c = 0$ 的解是 \(x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}\)，价格 $5 和 $10 不是公式。
+
+$$\int_0^\infty e^{-x^2}\,dx = \frac{\sqrt{\pi}}{2}$$
+
+跨行的块级公式：
+
+$$
+A = \begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix}, \quad \sum_{k=1}^{n} k = \frac{n(n+1)}{2}
+$$
+
+\[ f(x) = \begin{cases} x^2 & x \ge 0 \\ -x & x < 0 \end{cases} \]
+
+很长的公式横向滚动：$$e^{i\pi} + 1 = 0$$ 这种写在句子里的按行内排。
+
+$$\mathcal{L}(\theta) = -\frac{1}{N}\sum_{i=1}^{N}\left[y_i \log \hat{y}_i + (1-y_i)\log(1-\hat{y}_i)\right] + \lambda \lVert \theta \rVert_2^2$$
+
+**粗体里的 $x_i^2$** 和 `代码里的 $x$` 不同。
+
+常用派生式（1.7.3 不认、靠替换的写法）：
+
+- 地表重力加速度 $g = \dfrac{GM}{R^2}$
+- 圆轨道速度 $v = \sqrt{\dfrac{GM}{r}}$，逃逸速度 $v_e = \sqrt{\dfrac{2GM}{r}}$
+- 引力势能 $U = -\dfrac{Gm_1m_2}{r}$（取无穷远为零）
+- $\operatorname{argmax}_x f(x)$、$a \equiv b \pmod{n}$、$x \in \R$、$A \overset{f}{\to} B$
+- 答案 $\boxed{42}$，范数 $\lVert x \rVert_2$
+
+- **粗体**、*斜体*、~~删除线~~、`行内代码`
+- 嵌套列表
+  - 第二层 $\alpha + \beta$
+1. 有序一
+2. 有序二
+
+> 引用里的公式 $E = mc^2$
+
+| 符号 | 含义 |
+|:---|---:|
+| $\sum$ | 求和 |
+| `\int` | 积分 |
+
+```swift
+let x = pow(2.0, 10) // $不是公式$
+```
+
+---
+
+[链接](https://example.com)
+"""#
 }

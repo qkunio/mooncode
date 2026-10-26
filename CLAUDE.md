@@ -402,6 +402,11 @@ SIMCTL_CHILD_KIMI_DEBUG_REFRESH_TOKEN="$(python3 -c "import json;print(json.load
   取消选择时别立刻改选区（系统会自己藏高亮），否则正在缩回的菜单会跟着滑走；旧选区等动画完再清。
   表格长按弹系统菜单「拷贝」（`.contextMenu`，制表符分列），代码块用自带复制按钮。
   UIKit 读不到 SwiftUI 环境的 `.font` / `.foregroundStyle`，`MarkdownText` 要换字号颜色得传 `tone`。工具输出面板仍是 `.textSelection` 整段拷贝。
+- **LaTeX 用 SwiftMath 原生排版**（`Features/Session/MathText.swift`，不用 WebView）：`$…$` / `\(…\)` 行内公式先换成占位符再解析 Markdown，
+  再换成 `MathAttachment`（图片附件，跟文字一起可选，拷贝 / 添加到会话框时换回 `$源码$`）；`$$…$$` / `\[…\]` 独占几行是 `MarkdownBlock.math`
+  （放得下居中、太宽横滑、长按拷贝公式）；表格格子里嵌图片。`$5 和 $10` 这种不算公式，行内代码 / 代码块里不解析。SwiftMath 1.7.3 不认的
+  `\dfrac`、`\operatorname`、`\lVert`、`\boxed`、`\tag`、`\overset`、`align` / `equation` 环境等在 `MathRenderer.normalized` 里换掉（加新映射前先用 1.7.3 实测，main 分支支持得更多，别拿它测）；仍排不出来就显示源码。排好的图按（源码, 字号, 颜色）缓存，换深浅色重排。
+  体验模式（仅 DEBUG）发「md」回一段 Markdown / 公式样例。
 - **样式对齐官方、字号走我们的系统动态字体**：正文 `.body`，工具行 / 思考 / 折叠头 `.subheadline`，元信息 `.caption`；
   颜色 token（用户气泡 #f5f5f5 / #292929、面板 3% 底、diff 绿红、Kimi 蓝）在 `MarkdownText.swift` 的 `Palette`。
   用户气泡是胶囊（单行）/ 大圆角（多行）、中等字重；下面的复制 / 撤回 / 时间默认收着，点气泡才展开。

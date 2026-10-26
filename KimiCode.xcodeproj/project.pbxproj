@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A1000000000000000000090 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000092 /* SwiftMath */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		A1000000000000000000001 /* KimiCode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = KimiCode.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1000000000000000000002 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
@@ -24,6 +28,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1000000000000000000090 /* SwiftMath in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -74,6 +79,9 @@
 				A1000000000000000000010 /* KimiCode */,
 			);
 			name = KimiCode;
+			packageProductDependencies = (
+				A1000000000000000000092 /* SwiftMath */,
+			);
 			productName = KimiCode;
 			productReference = A1000000000000000000001 /* KimiCode.app */;
 			productType = "com.apple.product-type.application";
@@ -103,6 +111,9 @@
 			);
 			mainGroup = A1000000000000000000030;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A1000000000000000000091 /* XCRemoteSwiftPackageReference "SwiftMath" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A1000000000000000000031 /* Products */;
 			projectDirPath = "";
@@ -277,6 +288,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A1000000000000000000091 /* XCRemoteSwiftPackageReference "SwiftMath" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mgriebling/SwiftMath";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.7.3;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A1000000000000000000092 /* SwiftMath */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1000000000000000000091 /* XCRemoteSwiftPackageReference "SwiftMath" */;
+			productName = SwiftMath;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A1000000000000000000060 /* Project object */;
 }

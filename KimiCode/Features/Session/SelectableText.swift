@@ -35,12 +35,15 @@ struct SelectableText: UIViewRepresentable {
     func updateUIView(_ view: SelectableTextView, context: Context) {
         let coordinator = context.coordinator
         coordinator.addToComposer = context.environment.addToComposer
-        let key = Coordinator.Key(content: content, dynamicTypeSize: context.environment.dynamicTypeSize)
+        let colorScheme = context.environment.colorScheme
+        let key = Coordinator.Key(content: content, dynamicTypeSize: context.environment.dynamicTypeSize, colorScheme: colorScheme)
         if coordinator.key != key {
             coordinator.key = key
             coordinator.sizes = [:]
             let selection = view.selectedRange
-            view.attributedText = content.attributedString()
+            // 公式是画好的图片，颜色得按这时的深浅色定（换主题时 key 变了会重排）。
+            let traits = view.traitCollection.modifyingTraits { $0.userInterfaceStyle = colorScheme == .dark ? .dark : .light }
+            view.attributedText = content.attributedString(traits: traits)
             // 流式输出只往后追加：正在选的范围还在就留着。
             if selection.length > 0, NSMaxRange(selection) <= view.attributedText.length {
                 view.selectedRange = selection
@@ -80,6 +83,7 @@ struct SelectableText: UIViewRepresentable {
         struct Key: Equatable {
             let content: RichText
             let dynamicTypeSize: DynamicTypeSize
+            let colorScheme: ColorScheme
         }
 
         struct SizeKey: Hashable {
@@ -100,8 +104,8 @@ struct SelectableText: UIViewRepresentable {
             editMenuForTextIn range: NSRange,
             suggestedActions: [UIMenuElement]
         ) -> UIMenu? {
-            guard let addToComposer, range.length > 0,
-                  let text = (textView.text as NSString?)?.substring(with: range) else { return nil }
+            guard let addToComposer, range.length > 0, NSMaxRange(range) <= textView.attributedText.length else { return nil }
+            let text = textView.attributedText.attributedSubstring(from: range).stringWithMathSource
             let add = UIAction(title: "添加到会话框", image: UIImage(systemName: "text.badge.plus")) { [weak textView] _ in
                 addToComposer(text)
                 _ = textView?.resignFirstResponder()
@@ -165,6 +169,13 @@ final class SelectableTextView: UITextView {
         return view.convert(selection, to: nil).insetBy(dx: -24, dy: -24).contains(point)
     }
 
+    /// 拷贝时行内公式换回 `$源码$`，不然只拷到一个占位符。
+    override func copy(_ sender: Any?) {
+        let range = selectedRange
+        guard range.length > 0, NSMaxRange(range) <= attributedText.length else { return super.copy(sender) }
+        UIPasteboard.general.string = attributedText.attributedSubstring(from: range).stringWithMathSource
+    }
+
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
         if became { Self.selecting = self }
@@ -194,12 +205,13 @@ enum RichText: Equatable {
     case markdown([MarkdownBlock], tone: TextTone)
     case plain(String, tone: TextTone, lineSpacing: CGFloat)
 
-    func attributedString() -> NSAttributedString {
+    /// `traits`：按它的深浅色画行内公式。
+    func attributedString(traits: UITraitCollection = .current) -> NSAttributedString {
         switch self {
         case let .markdown(blocks, tone):
             let result = NSMutableAttributedString()
             for block in blocks {
-                guard let segment = Self.markdown(block, tone: tone) else { continue }
+                guard let segment = Self.markdown(block, tone: tone, traits: traits) else { continue }
                 if result.length > 0 {
                     // 换行符跟着上一块的样式，段间距才算在上一块上。
                     let attributes = result.attributes(at: result.length - 1, effectiveRange: nil)
@@ -220,8 +232,11 @@ enum RichText: Equatable {
     }
 
     /// 和 `MarkdownText` 里各块的 SwiftUI 样式对应：字号、行距、块间距 8。
-    private static func markdown(_ block: MarkdownBlock, tone: TextTone) -> NSAttributedString? {
+    private static func markdown(_ block: MarkdownBlock, tone: TextTone, traits: UITraitCollection) -> NSAttributedString? {
         let body = tone.font
+        func inline(_ text: String, font: UIFont, color: UIColor) -> NSMutableAttributedString {
+            Self.inline(text, font: font, color: color, traits: traits)
+        }
         switch block {
         case let .paragraph(text):
             let result = inline(text, font: body, color: tone.color)
@@ -254,14 +269,41 @@ enum RichText: Equatable {
                 result.append(line)
             }
             return result
-        case .quote, .code, .table, .rule:
+        case .quote, .code, .math, .table, .rule:
             // 这几种在 `MarkdownText` 里单独排，不进连续的选区。
             return nil
         }
     }
 
-    /// 行内 Markdown（粗体 / 斜体 / 行内代码 / 删除线 / 链接），对应 `MarkdownText.inline`。
-    private static func inline(_ text: String, font: UIFont, color: UIColor) -> NSMutableAttributedString {
+    /// 行内 Markdown（粗体 / 斜体 / 行内代码 / 删除线 / 链接），对应 `MarkdownText.inline`；
+    /// 行内公式先换成占位符，解析完再换成 `MathAttachment`。
+    private static func inline(_ text: String, font: UIFont, color: UIColor, traits: UITraitCollection) -> NSMutableAttributedString {
+        let (masked, formulas) = MathSyntax.mask(text)
+        let result = inlineMarkdown(masked, font: font, color: color)
+        guard !formulas.isEmpty else { return result }
+        let resolved = color.resolvedColor(with: traits)
+        var next = formulas.startIndex
+        var location = 0
+        let placeholder = String(MathSyntax.placeholder) as NSString
+        while next < formulas.endIndex {
+            let found = (result.string as NSString).range(of: placeholder as String, range: NSRange(location: location, length: result.length - location))
+            guard found.location != NSNotFound else { break }
+            let formula = formulas[next]
+            let attributes = result.attributes(at: found.location, effectiveRange: nil)
+            let runFont = attributes[.font] as? UIFont ?? font
+            let replacement = NSMutableAttributedString(
+                attributedString: MathAttachment.string(for: formula, font: runFont, color: resolved)
+                    ?? NSAttributedString(string: formula.source)
+            )
+            replacement.addAttributes(attributes.filter { $0.key != .attachment }, range: NSRange(location: 0, length: replacement.length))
+            result.replaceCharacters(in: found, with: replacement)
+            location = found.location + replacement.length
+            next += 1
+        }
+        return result
+    }
+
+    private static func inlineMarkdown(_ text: String, font: UIFont, color: UIColor) -> NSMutableAttributedString {
         let parsed = (try? AttributedString(
             markdown: text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace, failurePolicy: .returnPartiallyParsedIfPossible)

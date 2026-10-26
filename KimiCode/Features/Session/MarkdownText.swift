@@ -3,11 +3,11 @@ import UIKit
 
 /// 助手正文的 Markdown 渲染。
 ///
-/// 块级（段落 / 标题 / 列表 / 引用 / 代码块 / 表格 / 分隔线）自己切，行内（粗体 / 行内代码 /
-/// 链接）交给 `AttributedString(markdown:)`。流式输出时每次全量重排，只要切块是纯函数就不会闪。
+/// 块级（段落 / 标题 / 列表 / 引用 / 代码块 / 公式 / 表格 / 分隔线）自己切，行内（粗体 / 行内代码 /
+/// 链接）交给 `AttributedString(markdown:)`，行内公式先抠出来再解析（见 `MathText.swift`）。流式输出时每次全量重排，只要切块是纯函数就不会闪。
 ///
 /// 正文可以长按自由选择（见 `SelectableText`）：连续的段落 / 标题 / 列表排在同一个文本视图里，能跨段连着选；
-/// 代码块、表格、引用、分隔线把它们隔开，选区到这儿就停。
+/// 代码块、公式、表格、引用、分隔线把它们隔开，选区到这儿就停。
 struct MarkdownText: View {
     let text: String
     /// 正文的基础字号 / 颜色。可选文本是 UIKit 排的，读不到外面的 `.font` / `.foregroundStyle`。
@@ -35,7 +35,7 @@ struct MarkdownText: View {
             switch block {
             case .paragraph, .heading, .list:
                 prose.append(block)
-            case .quote, .code, .table, .rule:
+            case .quote, .code, .math, .table, .rule:
                 if !prose.isEmpty { runs.append(.prose(prose)) }
                 prose = []
                 runs.append(.block(block))
@@ -58,6 +58,8 @@ struct MarkdownText: View {
             .fixedSize(horizontal: false, vertical: true)
         case let .block(.code(language, code)):
             CodeBlockView(language: language, code: code)
+        case let .block(.math(latex)):
+            MathBlockView(latex: latex)
         case let .block(.table(rows)):
             MarkdownTable(rows: rows)
         case .block(.rule):
@@ -93,6 +95,8 @@ enum MarkdownBlock: Equatable {
     case list([ListItem], ordered: Bool)
     case quote(String)
     case code(language: String?, code: String)
+    /// 独占几行的公式（`$$…$$` / `\[…\]`），里面是 LaTeX。
+    case math(String)
     case table([[String]])
     case rule
 
@@ -126,6 +130,36 @@ enum MarkdownBlock: Equatable {
                 index += 1
                 blocks.append(.code(language: language.isEmpty ? nil : language, code: code.joined(separator: "\n")))
                 continue
+            }
+
+            // 块级公式：`$$` / `\[` 开头。同一行收尾且后面没别的字才算块，否则留给行内；
+            // 跨行的吃到收尾那行，未闭合（流式中）就吃到结尾。
+            if trimmed.hasPrefix("$$") || trimmed.hasPrefix("\\[") {
+                let close = trimmed.hasPrefix("$$") ? "$$" : "\\]"
+                let rest = trimmed.dropFirst(2)
+                if let end = rest.range(of: close) {
+                    if rest[end.upperBound...].trimmingCharacters(in: .whitespaces).isEmpty {
+                        flushParagraph()
+                        blocks.append(.math(rest[..<end.lowerBound].trimmingCharacters(in: .whitespaces)))
+                        index += 1
+                        continue
+                    }
+                } else {
+                    flushParagraph()
+                    var body = [String(rest)]
+                    index += 1
+                    while index < lines.count {
+                        let line = lines[index]
+                        index += 1
+                        if let end = line.range(of: close) {
+                            body.append(String(line[..<end.lowerBound]))
+                            break
+                        }
+                        body.append(line)
+                    }
+                    blocks.append(.math(body.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)))
+                    continue
+                }
             }
 
             if trimmed.isEmpty {
@@ -256,6 +290,8 @@ struct CodeBlockView: View {
 private struct MarkdownTable: View {
     let rows: [[String]]
 
+    @Environment(\.colorScheme) private var colorScheme
+
     /// 按每列最长的内容估一个列宽（60…240pt），超出的在格子里换行。
     private var widths: [CGFloat] {
         let columns = rows.map(\.count).max() ?? 0
@@ -274,7 +310,11 @@ private struct MarkdownTable: View {
                 ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
                     HStack(alignment: .top, spacing: 0) {
                         ForEach(Array(widths.enumerated()), id: \.offset) { column, width in
-                            Text(MarkdownText.inline(row.indices.contains(column) ? row[column] : ""))
+                            MarkdownText.inlineText(
+                                row.indices.contains(column) ? row[column] : "",
+                                fontSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize,
+                                colorScheme: colorScheme
+                            )
                                 .font(rowIndex == 0 ? .subheadline.weight(.semibold) : .subheadline)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .padding(.horizontal, 10)
