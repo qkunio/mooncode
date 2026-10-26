@@ -128,6 +128,32 @@ struct SelectableText: UIViewRepresentable {
             return UIMenu(children: [UIMenu(options: .displayInline, children: front)] + rest)
         }
 
+        /// 长按行内公式：系统默认给的是图片菜单（拷贝图像 / 保存到相机胶卷），换成「拷贝公式」。其他（链接等）照系统的。
+        func textView(
+            _ textView: UITextView,
+            menuConfigurationFor textItem: UITextItem,
+            defaultMenu: UIMenu
+        ) -> UITextItem.MenuConfiguration? {
+            guard case let .textAttachment(attachment) = textItem.content,
+                  let math = attachment as? MathAttachment else {
+                return UITextItem.MenuConfiguration(menu: defaultMenu)
+            }
+            let copy = UIAction(title: "拷贝公式", image: UIImage(systemName: "doc.on.doc")) { _ in
+                UIPasteboard.general.string = math.latex
+            }
+            return UITextItem.MenuConfiguration(menu: UIMenu(children: [copy]))
+        }
+
+        /// 点一下公式不做事（默认会当图片处理）。
+        func textView(
+            _ textView: UITextView,
+            primaryActionFor textItem: UITextItem,
+            defaultAction: UIAction
+        ) -> UIAction? {
+            if case let .textAttachment(attachment) = textItem.content, attachment is MathAttachment { return nil }
+            return defaultAction
+        }
+
         /// 逐层过滤系统菜单里的命令（「查询」「搜索网页」都嵌在子菜单里）。
         private static func filter(_ elements: [UIMenuElement], keep: (UICommand) -> Bool) -> [UIMenuElement] {
             elements.compactMap { element in

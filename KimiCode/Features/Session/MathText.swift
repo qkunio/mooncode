@@ -230,7 +230,10 @@ enum MathRenderer {
 
 /// 正文里的行内公式。记着源码，拷贝 / 添加到会话框时换回去。
 final class MathAttachment: NSTextAttachment {
+    /// 连定界符的原文，拷贝选中文字时用。
     var source = ""
+    /// 不带定界符的 LaTeX，长按「拷贝公式」用（和块级公式一致）。
+    var latex = ""
 
     /// 排成附件；排不出来返回 nil，调用方放回源码。
     static func string(for formula: MathSyntax.Formula, font: UIFont, color: UIColor) -> NSAttributedString? {
@@ -239,6 +242,7 @@ final class MathAttachment: NSTextAttachment {
         }
         let attachment = MathAttachment()
         attachment.source = formula.source
+        attachment.latex = formula.latex
         attachment.image = rendered.image
         attachment.bounds = CGRect(
             x: 0, y: -rendered.descent,
