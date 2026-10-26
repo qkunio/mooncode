@@ -424,6 +424,8 @@ SIMCTL_CHILD_KIMI_DEBUG_REFRESH_TOKEN="$(python3 -c "import json;print(json.load
 - **停止走 REST `:abort`，不走 WS `abort`** —— 与网页端一致。
 - **草稿会话。** 在文件夹旁点 + 不会立刻建会话，第一条消息发出时才 `POST /sessions`，
   避免空会话污染侧栏。
+- **输入框草稿按对话记着。** 切对话时 `ChatContent` 整个重建，没发出去的字存在 `AppModel.composerDrafts`（键：设备 + 会话 id，
+  新对话草稿用设备 + 文件夹 id），回来时取回。只在内存里，不落盘，退出登录清空；附件不记。
 - **乐观发送。** 用户消息先本地显示，失败给"重试/丢弃"，成功后由正文里的真实消息顶替（按文本去重）。
 - **正文只订阅主 agent**（`agent_id=main`），子 agent 的留给 task 面板。
 

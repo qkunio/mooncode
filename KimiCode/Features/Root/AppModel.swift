@@ -27,6 +27,10 @@ final class AppModel {
     /// 主页正在看的对话。
     private(set) var chat: ChatModel?
 
+    /// 输入框里还没发出去的字，按对话记着：切到别的对话再回来还在。
+    /// 只在内存里（不落盘），退出登录清掉。打字时每个字都写，不参与观察，免得整页跟着重绘。
+    @ObservationIgnored private var composerDrafts: [String: String] = [:]
+
     /// 体验模式（App Store 审核用）：不登录、不连任何设备，数据全来自本地演示后端 `DemoClient`。
     private(set) var isDemoMode = false
 
@@ -311,9 +315,25 @@ final class AppModel {
         UserDefaults.standard.set(try? JSONEncoder().encode(config), forKey: Self.composerConfigKey)
     }
 
+    // MARK: 输入框草稿
+
+    func composerDraft(for chat: ChatModel) -> String {
+        composerDrafts[draftKey(chat)] ?? ""
+    }
+
+    func setComposerDraft(_ text: String, for chat: ChatModel) {
+        composerDrafts[draftKey(chat)] = text.isEmpty ? nil : text
+    }
+
+    /// 设备 + 会话；还没建会话的新对话按文件夹记。
+    private func draftKey(_ chat: ChatModel) -> String {
+        "\(endpoint?.deviceID ?? "")/" + (chat.sessionID ?? "draft:\(chat.workspace?.id ?? "")")
+    }
+
     // MARK: 账号
 
     func signOut() {
+        composerDrafts = [:]
         chat?.stop()
         chat = nil
         endpoint = nil

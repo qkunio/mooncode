@@ -27,7 +27,7 @@ struct ChatScreen: View {
     var body: some View {
         Group {
             if let chat = app.chat {
-                ChatContent(chat: chat, face: face)
+                ChatContent(chat: chat, face: face, initialDraft: app.composerDraft(for: chat))
                     .id(chat.sessionID ?? "draft:\(chat.workspace?.id ?? "")")
                     .transition(.opacity)
             } else {
@@ -153,7 +153,8 @@ private struct ChatContent: View {
     let face: Namespace.ID
 
     @Environment(AppModel.self) private var app
-    @State private var draft = ""
+    /// 输入框的字。切对话时这个视图整个重建，所以每次改动都存进 `AppModel`，回来时从那里取。
+    @State private var draft: String
     /// 点了对话里的文件提及，正在预览的文件。
     @State private var previewingFile: FsEntry?
     @State private var ui = TranscriptUIState()
@@ -164,9 +165,10 @@ private struct ChatContent: View {
     @State private var isRevealed: Bool
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
 
-    init(chat: ChatModel, face: Namespace.ID) {
+    init(chat: ChatModel, face: Namespace.ID, initialDraft: String) {
         self.chat = chat
         self.face = face
+        _draft = State(initialValue: initialDraft)
         _isRevealed = State(initialValue: !Self.isAwaitingHistory(chat))
     }
 
@@ -274,6 +276,7 @@ private struct ChatContent: View {
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
+            .onChange(of: draft) { _, text in app.setComposerDraft(text, for: chat) }
         }
         .alert(
             "出错了",
