@@ -157,10 +157,19 @@ actor EventStream {
     /// 超过两个心跳周期没收到任何帧，说明连接在后台已经断了，立刻重连，不等系统报错和退避。
     func reconnectIfStale() {
         guard !isStopped else { return }
-        if let task {
+        if task != nil {
             let limit = Duration.milliseconds(max(heartbeatMS * 2, 10_000))
             guard let lastActivity, ContinuousClock.now - lastActivity > limit else { return }
             logger.info("ws 回到前台时已失联，重连")
+        }
+        reconnectNow()
+    }
+
+    /// 不管连接看起来活没活着，立刻断开重连（跳过退避）。在后台被挂起过一段时间后用：
+    /// 这时连接多半已经被系统掐掉，只是还没报错，不必等心跳超时才发现。重连带着游标，缺的正文由服务端补发。
+    func reconnectNow() {
+        guard !isStopped else { return }
+        if let task {
             skipBackoff = true
             task.cancel(with: .goingAway, reason: nil)
         } else {

@@ -183,14 +183,17 @@ private struct ChatContent: View {
                 // 不用 LazyVStack：高度差异大时它估不准，滚到底会落在空白里。
                 // 一页只有 30 轮、折叠的部分本来就不渲染，普通 VStack 足够。
                 VStack(alignment: .leading, spacing: 0) {
-                    if chat.isLoading, chat.entries.isEmpty {
+                    if chat.isRefreshingStale || (chat.isLoading && chat.entries.isEmpty) {
                         ChatSkeleton()
                     }
 
-                    ConversationList(chat: chat, ui: ui) { entry in
-                        undoTarget = entry
+                    // 后台久了回来重拉期间整个撤掉旧正文：内容只剩骨架那么高，视口自然落在顶部看得见它。
+                    if !chat.isRefreshingStale {
+                        ConversationList(chat: chat, ui: ui) { entry in
+                            undoTarget = entry
+                        }
+                        .opacity(isRevealed ? 1 : 0)
                     }
-                    .opacity(isRevealed ? 1 : 0)
                 }
                 .padding(.horizontal)
                 .padding(.top, 12)
@@ -243,6 +246,16 @@ private struct ChatContent: View {
             .onChange(of: Self.isAwaitingHistory(chat)) { _, waiting in
                 guard !waiting, !isRevealed else { return }
                 withAnimation(.easeOut(duration: 0.3)) { isRevealed = true }
+            }
+            // 后台久了回来：骨架期间藏起正文，重拉完贴底、淡入，和打开会话首屏一样。
+            .onChange(of: chat.isRefreshingStale) { _, stale in
+                if stale {
+                    isRevealed = false
+                } else {
+                    isFollowing = true
+                    scrollToBottom(animated: false)
+                    withAnimation(.easeOut(duration: 0.3)) { isRevealed = true }
+                }
             }
             // 一轮结束时「工作中」那行换成页脚，高度会变，再贴一次底。
             .onChange(of: chat.isWorking) { if isFollowing { scrollToBottom() } }

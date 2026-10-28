@@ -39,6 +39,8 @@ final class ChatModel {
     private(set) var pendingApprovals: [ApprovalRequest] = []
     private(set) var pendingQuestions: [QuestionRequest] = []
     private(set) var isLoading = false
+    /// 在后台待超过 30 秒回来：这段时间连接多半断过，屏幕上的正文不再可信，先换成骨架屏，重拉完再显示。
+    private(set) var isRefreshingStale = false
     private(set) var isLoadingOlder = false
     private(set) var isSending = false
     /// `POST /prompts` 已经返回、但正文里这一轮还没开始跑：接住这段空档，「请求中…」不中途消失。
@@ -90,6 +92,14 @@ final class ChatModel {
     private var stream: EventStream?
     private var streamTask: Task<Void, Never>?
     private var foregroundTask: Task<Void, Never>?
+    private var backgroundTask: Task<Void, Never>?
+    /// 进后台时向系统要的那段执行时间（约 30 秒）：短暂切出去时连接不断，正文照常往下收。
+    private var backgroundTimeID: UIBackgroundTaskIdentifier = .invalid
+    private var backgroundedAt: ContinuousClock.Instant?
+    /// 后台时间用完了（系统马上要挂起 App），连接多半会被掐掉。
+    private var backgroundTimeExpired = false
+    /// 在后台待了超过这么久（约等于系统给的后台时间），回来就不信任旧连接和旧正文：直接重连、骨架屏重拉。
+    private static let backgroundGrace: Duration = .seconds(30)
     /// 正在全量重拉的次数。期间收到的正文增量先存着，拉完再按顺序补上（网页端 `buffered`），
     /// 否则会先应用到旧数据上、再被重拉结果整个盖掉。
     private var activeReloads = 0
@@ -205,11 +215,54 @@ final class ChatModel {
                 await self?.handle(signal)
             }
         }
-        // 回到前台：后台时连接多半已经被系统掐掉，先检查一下，断了就立刻重连（网页端 focus 时同样处理）。
+        // 进后台：先要一段执行时间，期间连接不断。
+        backgroundTask = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: UIApplication.didEnterBackgroundNotification) {
+                self?.beginBackgroundTime()
+            }
+        }
+        // 回到前台：在后台待超了（或后台时间用完被挂起过）就直接重连；否则检查一下连接，断了才重连（网页端 focus 时同样处理）。
+        // 从控制中心、通知栏回来也会走到这里，那时没进过后台，只做检查。
         foregroundTask = Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: UIApplication.didBecomeActiveNotification) {
-                await self?.stream?.reconnectIfStale()
+                await self?.returnToForeground()
             }
+        }
+    }
+
+    private func beginBackgroundTime() {
+        endBackgroundTime()
+        backgroundedAt = .now
+        backgroundTimeExpired = false
+        backgroundTimeID = UIApplication.shared.beginBackgroundTask(withName: "kimi.stream") { [weak self] in
+            // 系统在时间到之前回调这里，必须马上把这段时间还回去，否则 App 会被杀掉。
+            MainActor.assumeIsolated {
+                self?.backgroundTimeExpired = true
+                self?.endBackgroundTime()
+            }
+        }
+    }
+
+    private func endBackgroundTime() {
+        guard backgroundTimeID != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTimeID)
+        backgroundTimeID = .invalid
+    }
+
+    private func returnToForeground() async {
+        let away = backgroundedAt.map { ContinuousClock.now - $0 }
+        let expired = backgroundTimeExpired
+        backgroundedAt = nil
+        backgroundTimeExpired = false
+        endBackgroundTime()
+        if expired || (away ?? .zero) > Self.backgroundGrace {
+            await stream?.reconnectNow()
+            // 体验模式没有连接可断，正文一直是对的，不用重拉。
+            guard liveUpdates, sessionID != nil else { return }
+            isRefreshingStale = true
+            scheduleTranscriptReload(after: .zero)
+        } else {
+            await stream?.reconnectIfStale()
         }
     }
 
@@ -218,6 +271,9 @@ final class ChatModel {
         streamTask = nil
         foregroundTask?.cancel()
         foregroundTask = nil
+        backgroundTask?.cancel()
+        backgroundTask = nil
+        endBackgroundTime()
         interactionRefresh.cancel()
         transcriptReload.cancel()
         let stream = stream
@@ -232,7 +288,7 @@ final class ChatModel {
         guard let sessionID else { return }
         // 只在屏幕上什么都没有时显示骨架屏（打开已有会话的首屏）。草稿发出第一条后建会话再重拉，
         // 那条消息已经乐观显示着，不该在它上面再冒骨架。
-        isLoading = entries.isEmpty && optimisticPrompts.isEmpty
+        isLoading = isRefreshingStale || (entries.isEmpty && optimisticPrompts.isEmpty)
         activeReloads += 1
         defer {
             isLoading = false
@@ -250,6 +306,7 @@ final class ChatModel {
             rebuild()
             // 正文一到就撤骨架：后面的 status / 确认拉取还在路上，不该挡着已到的内容。
             isLoading = false
+            isRefreshingStale = false
             if let seq = transcript.seq { await stream?.noteTranscriptSeq(sessionID, seq: seq) }
             apply(try await status)
             await refreshInteractions()
@@ -265,6 +322,8 @@ final class ChatModel {
             // 切换会话/停止订阅取消的是读取任务，不代表出错。
             guard !Task.isCancelled, !(error is CancellationError),
                   (error as? URLError)?.code != .cancelled else { return }
+            // 重拉失败就把旧正文放回来，总比一直挂着骨架强。
+            isRefreshingStale = false
             errorMessage = error.localizedDescription
         }
     }

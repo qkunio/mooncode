@@ -417,6 +417,10 @@ SIMCTL_CHILD_KIMI_DEBUG_REFRESH_TOKEN="$(python3 -c "import json;print(json.load
   空的 model / thinking 不往请求里带（服务端会拒 `thinking: Too small`）。
 - **执行轮数**：`loop_control.max_steps_per_turn` 不设或为 0 都是不限（`maxSteps > 0` 才限制），是电脑上的全局配置，App 不去改。
 - **心跳读 `server_hello`，不硬编码。** 实测服务端给的是 `heartbeat_ms=10000`，不是协议默认的 30s。
+- **进后台先要约 30 秒执行时间**（`beginBackgroundTask`，`ChatModel.beginBackgroundTime`），短暂切出去时 WS 不断、正文照常收。
+  回到前台：30 秒内回来 → `reconnectIfStale()`（两个心跳没收到帧才重连），正文是后台一直收着的、直接是最新；
+  在后台超过 30 秒或这段时间被用完 → `EventStream.reconnectNow()` 直接重连，同时 `isRefreshingStale` 把正文换成骨架屏、
+  REST 全量重拉，拉到后贴底淡入（体验模式不做）。
 - **游标续传。** 每条非 `volatile` 事件的 `seq`/`epoch` 按会话记下，重连时放进 `client_hello.cursors`，
   并处理 ack 里的 `resync_required`。
 - **发任务一律 `POST /prompts`，不排队。** 忙时 composer 只给停止。（早期版本误把文本发给 `prompts:steer`，
