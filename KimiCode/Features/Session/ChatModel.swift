@@ -86,6 +86,8 @@ final class ChatModel {
     /// 草稿刚建成会话、第一条消息还没发出：服务端此时还是默认配置（建会话时不采纳 agent_config），
     /// 别让它覆盖 composer 上选好的值 —— 第一条消息会把模型 / 思考强度 / 权限一起带上。
     private var holdsLocalConfig = false
+    /// 收到新版状态帧后，不再请求已移除的 REST status。
+    private var usesStateStream = false
     /// 现场量到的思考时长（官方 `thinkingTiming`），只在本次打开期间有效。
     private var thinkingTiming: [String: ThinkingTiming] = [:]
 
@@ -301,14 +303,14 @@ final class ChatModel {
         }
         do {
             async let page = client.transcript(sessionID)
-            async let status = client.status(sessionID)
+            async let status = legacyStatus(sessionID)
             transcript = TranscriptState(page: try await page)
             rebuild()
             // 正文一到就撤骨架：后面的 status / 确认拉取还在路上，不该挡着已到的内容。
             isLoading = false
             isRefreshingStale = false
             if let seq = transcript.seq { await stream?.noteTranscriptSeq(sessionID, seq: seq) }
-            apply(try await status)
+            if let status = try await status, !usesStateStream { apply(status) }
             await refreshInteractions()
             errorMessage = nil
 
@@ -358,10 +360,23 @@ final class ChatModel {
         }
     }
 
+    /// 仅旧 status 的 HTTP 404 可降级；正文请求、鉴权和其它错误仍正常报错。
+    private func legacyStatus(_ sessionID: String) async throws -> SessionRuntimeStatus? {
+        guard !usesStateStream else { return nil }
+        do {
+            return try await client.status(sessionID)
+        } catch KapError.http(status: 404, body: _) {
+            return nil
+        }
+    }
+
     private func apply(_ status: SessionRuntimeStatus) {
-        contextTokens = status.contextTokens
-        maxContextTokens = status.maxContextTokens
-        contextUsage = status.contextUsage
+        // agent 帧不含用量，usage 帧不含配置；不能互相清空。
+        if status.contextTokens != nil || status.contextUsage != nil {
+            contextTokens = status.contextTokens
+            maxContextTokens = status.maxContextTokens
+            contextUsage = status.contextUsage
+        }
         guard !holdsLocalConfig else { return }
         config = ComposerConfig(
             permission: status.permission ?? config.permission,
@@ -449,7 +464,7 @@ final class ChatModel {
         guard let sessionID else { return }
         do {
             try await client.updateProfile(sessionID, agentConfig: diff(from: previous, to: next))
-            if let status = try? await client.status(sessionID) { apply(status) }
+            if let status = try? await legacyStatus(sessionID), !usesStateStream { apply(status) }
         } catch {
             config = previous
             errorMessage = error.localizedDescription
@@ -641,6 +656,11 @@ final class ChatModel {
                 scheduleTranscriptReload()
             }
 
+        case let .runtimeState(eventSession, status):
+            guard eventSession == sessionID else { return }
+            usesStateStream = true
+            apply(status)
+
         case let .transcript(eventSession, event):
             guard eventSession == sessionID else { return }
             if activeReloads > 0 {
@@ -707,7 +727,10 @@ final class ChatModel {
             if wasActive, !transcript.isTurnActive, let sessionID {
                 // 一轮结束：刷新 composer 状态（上下文圈）和确认列表。
                 Task { [weak self] in
-                    if let status = try? await self?.client.status(sessionID) { self?.apply(status) }
+                    guard let self else { return }
+                    if let status = try? await self.legacyStatus(sessionID), !self.usesStateStream {
+                        self.apply(status)
+                    }
                 }
                 scheduleInteractionRefresh()
             }

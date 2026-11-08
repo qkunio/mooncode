@@ -488,7 +488,7 @@ enum PermissionMode: String, CaseIterable, Codable, Sendable, Identifiable {
     }
 }
 
-/// `GET /sessions/{id}/status`。官方网页端 composer 的模型标签、思考强度、权限、上下文圈都读它。
+/// 旧版 REST status，以及新版扁平 WS agent / usage 帧的状态字段。
 struct SessionRuntimeStatus: Decodable, Sendable {
     let busy: Bool?
     let model: String?
@@ -504,15 +504,26 @@ struct SessionRuntimeStatus: Decodable, Sendable {
         busy = try container.decodeIfPresent(Bool.self, forKey: .busy)
         model = try container.decodeIfPresent(String.self, forKey: .model)
         thinkingLevel = try container.decodeIfPresent(String.self, forKey: .thinkingLevel)
-        permission = (try? container.decodeIfPresent(String.self, forKey: .permission)).flatMap(PermissionMode.init)
+            ?? container.decodeIfPresent(String.self, forKey: .thinking)
+        let permissionValue = try container.decodeIfPresent(String.self, forKey: .permission)
+            ?? container.decodeIfPresent(String.self, forKey: .permissionMode)
+        permission = permissionValue.flatMap(PermissionMode.init)
         planMode = try container.decodeIfPresent(Bool.self, forKey: .planMode)
         contextTokens = try container.decodeIfPresent(Int.self, forKey: .contextTokens)
         maxContextTokens = try container.decodeIfPresent(Int.self, forKey: .maxContextTokens)
-        contextUsage = try container.decodeIfPresent(Double.self, forKey: .contextUsage)
+        if let usage = try container.decodeIfPresent(Double.self, forKey: .contextUsage) {
+            contextUsage = usage
+        } else if let contextTokens, let maxContextTokens, maxContextTokens > 0 {
+            contextUsage = Double(contextTokens) / Double(maxContextTokens)
+        } else {
+            contextUsage = nil
+        }
     }
 
     enum CodingKeys: String, CodingKey {
         case busy, model, permission
+        case thinking
+        case permissionMode = "permission_mode"
         case thinkingLevel = "thinking_level"
         case planMode = "plan_mode"
         case contextTokens = "context_tokens"

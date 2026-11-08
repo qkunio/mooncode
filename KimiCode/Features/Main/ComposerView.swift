@@ -209,13 +209,21 @@ struct ComposerView: View {
             isFocused = false
             activePanel = .model
         } label: {
-            // 模型名正常色，思考强度与占位文字同色。
-            (Text(modelName).foregroundStyle(.primary)
-                + Text(effortLabel.isEmpty ? "" : " \(effortLabel)").foregroundStyle(Color(.secondaryLabel)))
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .frame(height: 34)
+            // 强度保留完整宽度，空间不足时只截断模型名；沿用原来的字号、颜色和间隔。
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text(modelName)
+                    .foregroundStyle(.primary)
+                    .truncationMode(.tail)
+                if !effortLabel.isEmpty {
+                    Text(" \(effortLabel)")
+                        .foregroundStyle(Color(.secondaryLabel))
+                        .fixedSize(horizontal: true, vertical: false)
+                        .layoutPriority(1)
+                }
+            }
+            .font(.subheadline.weight(.medium))
+            .lineLimit(1)
+            .frame(height: 34)
         }
         .tint(.primary)
     }

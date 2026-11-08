@@ -12,6 +12,7 @@ struct FilePreviewView: View {
     var addToChat: (() -> Void)?
 
     @State private var phase: Phase = .loading
+    @State private var showsMarkdownSource = false
     /// 进页面就是 1（立刻加载）；每点一次「重试」加一，驱动 `.task(id:)`，离开页面时随视图一起取消。
     @State private var previewRequest = 1
     /// 菜单里点下载 / 保存到相册：记下动作、计数加一，驱动 `.task(id:)`。
@@ -109,6 +110,14 @@ struct FilePreviewView: View {
 
     private var menu: some View {
         Menu {
+            if case let .text(file) = phase, isMarkdown(file) {
+                Button(
+                    showsMarkdownSource ? "查看渲染结果" : "查看源码",
+                    systemImage: showsMarkdownSource ? "doc.richtext" : "chevron.left.forwardslash.chevron.right"
+                ) {
+                    showsMarkdownSource.toggle()
+                }
+            }
             Button("下载", systemImage: "arrow.down.circle") { run(.download) }
                 .disabled(isTooLarge)
             if isImage {
@@ -172,6 +181,16 @@ struct FilePreviewView: View {
 
     // MARK: 预览
 
+    private func isMarkdown(_ file: FsContent) -> Bool {
+        let extensions = ["md", "markdown", "mdown", "mkd", "mkdn"]
+        if extensions.contains((entry.name as NSString).pathExtension.lowercased()) { return true }
+        return [entry.mime, file.mime].compactMap { $0 }.contains { mime in
+            let type = mime.split(separator: ";", maxSplits: 1).first?
+                .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return type == "text/markdown" || type == "text/x-markdown"
+        }
+    }
+
     private func textView(_ file: FsContent) -> some View {
         VStack(spacing: 0) {
             if file.truncated {
@@ -185,7 +204,15 @@ struct FilePreviewView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.fill)
             }
-            CodeTextView(text: file.content)
+            if isMarkdown(file), !showsMarkdownSource {
+                ScrollView {
+                    MarkdownText(text: file.content)
+                        .padding(16)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                CodeTextView(text: file.content)
+            }
         }
     }
 

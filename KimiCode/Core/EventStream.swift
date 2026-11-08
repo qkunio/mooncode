@@ -26,6 +26,8 @@ enum StreamSignal: Sendable {
     case resyncRequired([String])
     /// 对话正文的增量（`subscribe_v2` 订阅的 `transcript.reset` / `transcript.ops`）。
     case transcript(sessionID: String, TranscriptWireEvent)
+    /// 新版服务端用扁平 agent / usage 帧替代 REST status。
+    case runtimeState(sessionID: String, SessionRuntimeStatus)
 }
 
 /// kap-server 的 WebSocket 事件通道。
@@ -343,6 +345,18 @@ actor EventStream {
                 ?? frame["session_id"]?.stringValue.map { [$0] }
                 ?? []
             continuation?.yield(.resyncRequired(sessions))
+            return
+
+        case "agent", "usage":
+            guard frame["agent_id"]?.stringValue == "main",
+                  let sessionID = frame["session_id"]?.stringValue,
+                  let data = try? JSONEncoder().encode(frame) else { return }
+            do {
+                let status = try JSONDecoder().decode(SessionRuntimeStatus.self, from: data)
+                continuation?.yield(.runtimeState(sessionID: sessionID, status))
+            } catch {
+                logger.error("状态帧解析失败：\(error.localizedDescription)")
+            }
             return
 
         case "transcript.reset", "transcript.ops":

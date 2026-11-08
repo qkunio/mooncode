@@ -65,7 +65,7 @@ enum KapError: LocalizedError {
         switch self {
         case let .http(status, body):
             if status == 401 { return "鉴权失败（401）。登录可能已过期，请重新登录。" }
-            if status == 404 { return "找不到该设备或接口（404）。设备可能已下线。" }
+            if status == 404 { return "请求的资源或接口不存在（404）。请检查设备连接及 Kimi Code 版本兼容性。" }
             if status == 502 { return "隧道无法连到那台电脑（502）。确认它醒着且 `kimi rc` 还在跑。" }
             return "HTTP \(status)\(body.isEmpty ? "" : "：\(body.prefix(200))")"
         case let .api(code, message):
