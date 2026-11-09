@@ -12,7 +12,7 @@ struct FilePreviewView: View {
     var addToChat: (() -> Void)?
 
     @State private var phase: Phase = .loading
-    @State private var showsMarkdownSource = false
+    @State private var showsSource = false
     /// 进页面就是 1（立刻加载）；每点一次「重试」加一，驱动 `.task(id:)`，离开页面时随视图一起取消。
     @State private var previewRequest = 1
     /// 菜单里点下载 / 保存到相册：记下动作、计数加一，驱动 `.task(id:)`。
@@ -110,12 +110,12 @@ struct FilePreviewView: View {
 
     private var menu: some View {
         Menu {
-            if case let .text(file) = phase, isMarkdown(file) {
+            if case let .text(file) = phase, renderableFormat(for: file) != nil {
                 Button(
-                    showsMarkdownSource ? "查看渲染结果" : "查看源码",
-                    systemImage: showsMarkdownSource ? "doc.richtext" : "chevron.left.forwardslash.chevron.right"
+                    showsSource ? "查看渲染结果" : "查看源码",
+                    systemImage: showsSource ? "doc.richtext" : "chevron.left.forwardslash.chevron.right"
                 ) {
-                    showsMarkdownSource.toggle()
+                    showsSource.toggle()
                 }
             }
             Button("下载", systemImage: "arrow.down.circle") { run(.download) }
@@ -181,14 +181,26 @@ struct FilePreviewView: View {
 
     // MARK: 预览
 
-    private func isMarkdown(_ file: FsContent) -> Bool {
-        let extensions = ["md", "markdown", "mdown", "mkd", "mkdn"]
-        if extensions.contains((entry.name as NSString).pathExtension.lowercased()) { return true }
-        return [entry.mime, file.mime].compactMap { $0 }.contains { mime in
-            let type = mime.split(separator: ";", maxSplits: 1).first?
-                .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            return type == "text/markdown" || type == "text/x-markdown"
+    private enum RenderableTextFormat {
+        case markdown
+        case html
+    }
+
+    private func renderableFormat(for file: FsContent) -> RenderableTextFormat? {
+        let ext = (entry.name as NSString).pathExtension.lowercased()
+        if ["md", "markdown", "mdown", "mkd", "mkdn"].contains(ext) { return .markdown }
+        if ["html", "htm", "xhtml"].contains(ext) { return .html }
+        let mimeTypes = [entry.mime, file.mime].compactMap { $0 }.map { mime in
+            mime.split(separator: ";", maxSplits: 1).first?
+                .trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         }
+        if mimeTypes.contains(where: { $0 == "text/markdown" || $0 == "text/x-markdown" }) {
+            return .markdown
+        }
+        if mimeTypes.contains(where: { $0 == "text/html" || $0 == "application/xhtml+xml" }) {
+            return .html
+        }
+        return nil
     }
 
     private func textView(_ file: FsContent) -> some View {
@@ -204,12 +216,17 @@ struct FilePreviewView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.fill)
             }
-            if isMarkdown(file), !showsMarkdownSource {
-                ScrollView {
-                    MarkdownText(text: file.content)
-                        .padding(16)
+            if let format = renderableFormat(for: file), !showsSource {
+                switch format {
+                case .markdown:
+                    ScrollView {
+                        MarkdownText(text: file.content)
+                            .padding(16)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .html:
+                    HTMLPreviewView(html: file.content)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 CodeTextView(text: file.content)
             }

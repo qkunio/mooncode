@@ -67,10 +67,10 @@ diff/文件卡片、看子 agent 与 task 面板、终端流）。
 | 文件夹旁 + | 草稿；第一条消息时 `POST /sessions {metadata:{cwd:root}, workspace_id, agent_config}` | 与网页端 `createSession` 同形 |
 | 头像 + 昵称 | `GET /oauth/userinfo` → `userInfo.{nickname, avatar}` | 响应里还有手机号等，**只解码这两个字段**。无昵称显示「Kimi 用户」 |
 | 退出登录 | 本地清凭证 | alert「是否退出登录？」→ 取消 / 退出 |
-| 权限图标 | `GET /sessions/{id}/status` 的 `permission` | composer 上只显示图标（hand.raised / checkmark.shield / bolt.shield），文字只在菜单里。**标签映射别弄反**：`manual`=始终询问、`yolo`=必要时询问、`auto`=完全自动 |
-| 右上角 📁（上下文环右边） | 目录：`POST /sessions/{id}/fs:list {path, limit:1000}`；文本预览：`POST /sessions/{id}/fs:read {path, offset:0, length:1MiB, encoding:auto}`；整个文件：`fs:read` 按 3 MiB 分块读 `encoding:base64` | 上拉栏（默认半屏 medium，可拉到 large），点文件夹逐级推入。点文件直接加载预览，右上角 ⋯ 菜单：「下载」走系统分享面板；「保存到相册」（仅图片，`PHPhotoLibrary` addOnly 权限）；「添加到会话」收起文件栏、在 composer 附件条加一张文件卡（`Attachment.mention`），发送时照网页端 `rv` 写成 `[名字](相对路径)` 拼在正文开头，不上传。正文里的这种提及由 `ConversationBuilder.splitMentions` 拆成气泡上的附件标签。输入框里的文件卡、气泡上的文件标签点一下弹出 `FilePreviewSheet`（经环境值 `openFilePreview`，读文件用的会话同 📁），从这里打开时菜单里没有「添加到会话」（含「保存到"文件"」）。文本用只读 UITextView 等宽显示、可自由选择，截断时提示总大小；二进制、图片/PDF/音视频拉整个文件交给 Quick Look。**不用 `GET fs/{path}:download`**：kap-server 2.0.1 把文件名原样写进 `content-disposition`，中文名直接 500；`fs:read` 又整体拒绝 >10 MiB 的文件（41302，与 offset 无关），所以超过 10 MB 直接显示「因 Kimi 官方限制，无法预览或下载 10MB 以上文件」，下载图标置灰。临时文件放 `tmp/MoonCodePreview/`，离开页面删、启动时清。草稿借同文件夹里最近的会话（workDir 相同）；文件夹里一个会话都没有时提示发第一条消息后再看（`fs:browse` 只回文件夹，拿不到文件） |
-| 右上角上下文环（📁 左边） | 环：`/status` 的 `context_usage`，之后由事件里的 `contextUsage` 实时更新（输入框上不放上下文圈）。点开「用量」上拉栏（左上角 ✕，medium/large），每项一张卡片、卡片上方灰色小标题：「此对话上下文」卡片 = 已使用 x% + 横条 + `context_tokens / max_context_tokens`；「5 小时 / 每周 / 每月使用限额」卡片 = `GET /oauth/usage` → `quota.usages.{limit5h,limit7d,monthTotal}` 的**已使用** `usedRatio` + 横条 +「21小时59分钟后重置」（`resetAt`） | 按 5 小时 → 每周 → 每月 顺序显示存在的项。打开时刷新用量 |
-| K3·Low | 同上 `model` + `thinking_level`；名字查 `GET /models` 的 `display_name`，可选强度查 `support_efforts` | `thinking` 取值是强度名或 `on`/`off`；只有一个选项（如恒开无强度）时只显示名字，`off` 显示「Off」 |
+| 权限图标 | 2.5+ WS 全量 `agent.permission_mode`；旧版 `GET /sessions/{id}/status` 的 `permission` | composer 上只显示图标（hand.raised / checkmark.shield / bolt.shield），文字只在菜单里。**标签映射别弄反**：`manual`=始终询问、`yolo`=必要时询问、`auto`=完全自动 |
+| 右上角 📁（上下文环右边） | 目录：`POST /sessions/{id}/fs:list {path, limit:1000}`；文本预览：`POST /sessions/{id}/fs:read {path, offset:0, length:1MiB, encoding:auto}`；整个文件：`fs:read` 按 3 MiB 分块读 `encoding:base64` | 上拉栏（默认半屏 medium，可拉到 large），点文件夹逐级推入。点文件直接加载预览，右上角 ⋯ 菜单：「下载」走系统分享面板；「保存到相册」（仅图片，`PHPhotoLibrary` addOnly 权限）；「添加到会话」收起文件栏、在 composer 附件条加一张文件卡（`Attachment.mention`），发送时照网页端 `rv` 写成 `[名字](相对路径)` 拼在正文开头，不上传。正文里的这种提及由 `ConversationBuilder.splitMentions` 拆成气泡上的附件标签。输入框里的文件卡、气泡上的文件标签点一下弹出 `FilePreviewSheet`（经环境值 `openFilePreview`，读文件用的会话同 📁），从这里打开时菜单里没有「添加到会话」（含「保存到"文件"」）。Markdown 默认复用 `MarkdownText` 渲染，HTML 默认用静态 `WKWebView` 渲染（禁 JavaScript 与外部网络资源），右上角可切换源码；源码用只读 UITextView 等宽显示、可自由选择，截断时提示总大小；二进制、图片/PDF/音视频拉整个文件交给 Quick Look。**不用 `GET fs/{path}:download`**：kap-server 2.0.1 把文件名原样写进 `content-disposition`，中文名直接 500；`fs:read` 又整体拒绝 >10 MiB 的文件（41302，与 offset 无关），所以超过 10 MB 直接显示「因 Kimi 官方限制，无法预览或下载 10MB 以上文件」，下载图标置灰。临时文件放 `tmp/MoonCodePreview/`，离开页面删、启动时清。草稿借同文件夹里最近的会话（workDir 相同）；文件夹里一个会话都没有时提示发第一条消息后再看（`fs:browse` 只回文件夹，拿不到文件） |
+| 右上角上下文环（📁 左边） | 环：2.5+ WS 全量 `usage`（`context_tokens / max_context_tokens`）；旧版 `/status` 的 `context_usage` 和 transcript `meta.agent.contextUsage`（输入框上不放上下文圈）。点开「用量」上拉栏（左上角 ✕，medium/large），每项一张卡片、卡片上方灰色小标题：「此对话上下文」卡片 = 已使用 x% + 横条 + `context_tokens / max_context_tokens`；「5 小时 / 每周 / 每月使用限额」卡片 = `GET /oauth/usage` → `quota.usages.{limit5h,limit7d,monthTotal}` 的**已使用** `usedRatio` + 横条 +「21小时59分钟后重置」（`resetAt`） | 按 5 小时 → 每周 → 每月 顺序显示存在的项。打开时刷新用量 |
+| K3·Low | 2.5+ WS 全量 `agent.model` + `agent.thinking`；旧版 `/status` 的 `model` + `thinking_level`。名字查 `GET /models` 的 `display_name`，可选强度查 `support_efforts` | `thinking` 取值是强度名或 `on`/`off`；只有一个选项（如恒开无强度）时只显示名字，`off` 显示「Off」 |
 | 模型菜单 | `GET /models` 全部列出，按 provider 分组（`managed:kimi-code` 组名「Kimi 订阅」排最前，其他照原 id 显示，同网页端） | 面板左上 ✕、右上 ⚙︎，点选即生效（无「完成」）；面板只放模型：provider 分组名（Kimi 订阅 / deepseek…）就是一级标题，同用量面板卡片上方的灰色小标题，不再套「模型来源」。composer 上「模型名 High」一个按钮，开 `ModelPanel`（`ThinkingSlider.swift`）：首页两张同样式卡片（标题 + 灰色副标题 + ›）：「当前模型」（模型名 / 来源）、「思考强度」（当前档位 / 全部档位）。点卡片在面板内推入子页（模型列表 / 思考强度），左上角返回；面板高度跟当前页走（各页量高度报给 detent，只有当前页报）。思考强度子页是大号分档滑杆，左低右高、「关闭」最左，拖动吸附、每档轻震、松手才写入；不用弹出菜单（iOS 26 菜单会从整行胶囊变形出来）。拉到最高档轨道变紫、白色小气泡不断向左飘，刚到顶档位名弹一下 + 迸一圈星星 + 重震（彩蛋，减弱动态效果时不动）。拖动位置用 `@GestureState` + `highPriorityGesture`，否则上拉栏抢走手势时滑块会卡在两档中间。⚙︎ 打开「模型配置」（`ProviderSettingsView.swift`）：最上面「默认配置」卡片（摘要「模型 · 权限 · 思考」）→ 默认模型 / 默认权限 / 默认思考三项（照网页端「Agent 默认值」前三项；读 `GET /config` 的 `default_model`、`default_permission_mode`（空=manual）、`thinking{enabled,effort?}`，每改一项 `POST /config` 只带该字段，思考按网页端 `q8`/`bpe` 写）；下面是模型供应商（照网页端「供应商管理」）：`GET /providers` 列表（状态点、左滑刷新 `POST /providers/{id}:refresh` / 删除 `DELETE`，204）；编辑表单模型表来自 `GET /config` 的 `models` 段（驼峰键，只解码这一段），保存 `PUT /providers/{id}`（改名带 `new_id`，key 三态：不带=保留、`""`=清空），手动添加 `POST /providers`（名称 / key / Base URL 必填）；从目录添加 `GET /catalog/providers` → `POST /providers:import_catalog`。Kimi 订阅（`managed:kimi-code`）OAuth 托管只读。注册表导入没做。改完 `AppModel.reloadModels()`。思考选项照网页端 `ov`/`sv`/`z1`：`always_thinking`+强度 → 选强度；只有 `thinking` → 开/关；都没有 → 固定 `off`（见 `ModelInfo.thinkingOptions`） |
 | 改权限 / 模型 / 强度 | `POST /sessions/{id}/profile {agent_config:{permission_mode?, model?, thinking?}}` | 只带改动的字段 |
 | 新对话默认值 | 上次的选择（UserDefaults）；第一次：`auto` + `GET /config` 的 `default_model` + 该模型默认思考（`defaultThinking`） | 模型已不在这台电脑上就退到列表第一个。建会话时显式带全，界面显示 == 真实值。电脑上模型凭证有问题时服务端回 40111/40112/40113（HTTP 200 信封），App 提示去电脑上配置，**不登出** |
@@ -391,9 +391,11 @@ SIMCTL_CHILD_KIMI_DEBUG_REFRESH_TOKEN="$(python3 -c "import json;print(json.load
 - **视图模型照搬网页端管线**（`Features/Session/ConversationBuilder.swift`）：turn → 用户 / 助手消息（`RE` + `C6`），
   连续的思考 + 工具 ≥2 个合成一组（`$At`，摘要「读取了 2 个文件 · 运行了 1 条命令」），
   最后一段正文之前的全部折叠成「已工作 X」（`FAt` / TurnFold），思考时长用客户端计时（`thinkingTiming`，不含等确认的时间）。
-- **运行态全从 transcript 派生**：`meta.activity == "turn"` = 在跑；`meta.agent.phase` 的 `retrying` → 「正在重试（第 n/max 次）」，
+- **运行态按服务端协议分源**：2.5+ 用全量 `agent.status` 判断在跑，用 `agent` / `usage` 同步配置和上下文；
+  旧版用 REST status 与 transcript `meta.activity`，首帧前也可回退到 turn 自身状态。重试优先读 `step.retry`，旧版再读 `meta.agent.phase`。
   `interrupted/aborted` 或末轮 `cancelled` → 「已手动终止」分隔线，`max_steps` / `error` / `failed` → 红色失败卡 +「继续」（发「继续」）。
-  确认 / 提问走 REST pending 列表（`/approvals?status=pending`、`/questions?status=pending`），有 `interaction.upsert` 或相关事件时重拉。
+  2.4+ 的确认 / 提问走 `interaction` 帧与 `/interactions/{id}` 统一回写，订阅 ack 后清空并重建 pending 全量；
+  旧版保留 `/approvals?status=pending`、`/questions?status=pending` 和旧回写。新版帧优先，晚到的旧响应不能覆盖。
 - **确认卡片的类型映射照搬网页端 `PJ`**：`command → shell`、`file_io`（write→file / edit→diff / 其他→fileop）、
   `url_fetch → url`、`agent_call / skill_call → invocation`、`todo_list → todo`、`plan_review`。
 - **正文原地自由选择**：iOS 上 `Text` 的 `.textSelection` 长按只能整段拷贝，所以助手 Markdown、用户气泡、思考段落改用不可编辑的
@@ -421,8 +423,9 @@ SIMCTL_CHILD_KIMI_DEBUG_REFRESH_TOKEN="$(python3 -c "import json;print(json.load
   回到前台：30 秒内回来 → `reconnectIfStale()`（两个心跳没收到帧才重连），正文是后台一直收着的、直接是最新；
   在后台超过 30 秒或这段时间被用完 → `EventStream.reconnectNow()` 直接重连，同时 `isRefreshingStale` 把正文换成骨架屏、
   REST 全量重拉，拉到后贴底淡入（体验模式不做）。
-- **游标续传。** 每条非 `volatile` 事件的 `seq`/`epoch` 按会话记下，重连时放进 `client_hello.cursors`，
-  并处理 ack 里的 `resync_required`。
+- **游标与快照恢复。** 旧版原始事件的 `seq`/`epoch` 按会话记下，重连时放进 `client_hello.cursors` 并处理
+  `resync_required`；2.5+ 已删除这条回放通道，正文用 `transcript_since`，配置 / 用量 / pending 则由订阅后的全量帧恢复。
+  主动订阅只在 `client_hello` 后发送，处理 `accepted` / `not_found` 并退避重试，避免握手期重复订阅。
 - **发任务一律 `POST /prompts`，不排队。** 忙时 composer 只给停止。（早期版本误把文本发给 `prompts:steer`，
   那个接口收的是 `{prompt_ids}`，已改掉。）
 - **停止走 REST `:abort`，不走 WS `abort`** —— 与网页端一致。

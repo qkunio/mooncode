@@ -22,8 +22,9 @@ struct ComposerConfig: Codable, Equatable, Sendable {
 ///
 /// 运行时与官方网页端一致：
 ///   - 正文：`GET /transcript` 首屏 + WS `subscribe_v2` 逐字增量，本地按 apply.ts 应用
-///   - 是否在跑 / 重试 / 中断 / 失败：transcript 的 `meta.activity` 与 `meta.agent.phase`
-///   - 权限确认、提问：REST 拉 pending 列表，WS 有相关事件时重拉
+///   - 是否在跑：新版读全量 agent.status；旧版用 transcript meta / turn，重试读 step.retry 或旧 phase
+///   - 配置与用量：新版读全量 agent / usage；旧版回退到 REST status 与 transcript meta
+///   - 权限确认、提问：新版读 interaction 帧并走统一回写；旧版用 REST pending 列表与旧回写
 ///   - 只做「发送」和「停止」：忙时不发（不排队），停止走 `:abort`
 @MainActor
 @Observable
@@ -36,8 +37,8 @@ final class ChatModel {
     private(set) var entries: [ChatEntry] = []
     /// 正文每变一次加一，给「停在底部就跟随」用。
     private(set) var contentVersion = 0
-    private(set) var pendingApprovals: [ApprovalRequest] = []
-    private(set) var pendingQuestions: [QuestionRequest] = []
+    var pendingApprovals: [ApprovalRequest] { interactions.approvals }
+    var pendingQuestions: [QuestionRequest] { interactions.questions }
     private(set) var isLoading = false
     /// 在后台待超过 30 秒回来：这段时间连接多半断过，屏幕上的正文不再可信，先换成骨架屏，重拉完再显示。
     private(set) var isRefreshingStale = false
@@ -86,10 +87,21 @@ final class ChatModel {
     /// 草稿刚建成会话、第一条消息还没发出：服务端此时还是默认配置（建会话时不采纳 agent_config），
     /// 别让它覆盖 composer 上选好的值 —— 第一条消息会把模型 / 思考强度 / 权限一起带上。
     private var holdsLocalConfig = false
-    /// 收到新版状态帧后，不再请求已移除的 REST status。
+    /// 只有收到严格解码的 agent 全量帧，才确认新版状态协议；usage 不能单独证明配置通道可用。
     private var usesStateStream = false
+    private var legacyStatusUnavailable = false
+    private var agentActivity: String?
+    private var interactions = PendingInteractions()
+    private var interactionProtocol: InteractionProtocol = .unknown
+    private var subscriptionError: String?
     /// 现场量到的思考时长（官方 `thinkingTiming`），只在本次打开期间有效。
     private var thinkingTiming: [String: ThinkingTiming] = [:]
+
+    private enum InteractionProtocol {
+        case unknown
+        case legacyREST
+        case frames
+    }
 
     private var stream: EventStream?
     private var streamTask: Task<Void, Never>?
@@ -141,16 +153,22 @@ final class ChatModel {
         self.onConfigChanged = onConfigChanged
     }
 
-    // MARK: 运行态（全部从 transcript 派生）
+    // MARK: 运行态
 
-    /// 本轮在跑（`meta.activity == "turn"`），或刚发出去还没回显。
-    var isWorking: Bool { transcript.isTurnActive || isSending || awaitingTurn }
+    /// 新版 agent.status 是权威值；首帧到达前及旧版使用 transcript 的活动状态。
+    var isWorking: Bool {
+        let serverActive = agentActivity.map { $0 != "idle" } ?? transcript.isTurnActive
+        return serverActive || isSending || awaitingTurn
+    }
 
     /// composer 用：忙时只给「停止」。
     var isBusy: Bool { isWorking }
 
-    /// `phase.kind == "retrying"`：「模型请求失败，正在重试（第 n/max 次）…」
+    /// 新旧 transcript 都有 step.retry；旧版再回退到 meta.agent.phase。
     var retry: (next: Int, max: Int)? {
+        if let retry = transcript.turns.last?.steps.reversed().compactMap(\.retry).first {
+            return (retry.nextAttempt, retry.maxAttempts)
+        }
         guard let phase = transcript.phase, phase["kind"]?.stringValue == "retrying" else { return nil }
         return (phase["nextAttempt"]?.intValue ?? 0, phase["maxAttempts"]?.intValue ?? 0)
     }
@@ -288,6 +306,7 @@ final class ChatModel {
     /// 全量重拉：正文尾部一页 + 待处理的确认/提问 + composer 状态。
     func reload() async {
         guard let sessionID else { return }
+        errorMessage = nil
         // 只在屏幕上什么都没有时显示骨架屏（打开已有会话的首屏）。草稿发出第一条后建会话再重拉，
         // 那条消息已经乐观显示着，不该在它上面再冒骨架。
         isLoading = isRefreshingStale || (entries.isEmpty && optimisticPrompts.isEmpty)
@@ -312,7 +331,6 @@ final class ChatModel {
             if let seq = transcript.seq { await stream?.noteTranscriptSeq(sessionID, seq: seq) }
             if let status = try await status, !usesStateStream { apply(status) }
             await refreshInteractions()
-            errorMessage = nil
 
             // 没有事件流的后端（体验模式）不会推增量：一轮还在跑时自己轮询，直到它落完。
             if !liveUpdates, transcript.isTurnActive {
@@ -347,11 +365,22 @@ final class ChatModel {
     }
 
     private func refreshInteractions() async {
-        guard let sessionID else { return }
-        async let approvals = client.pendingApprovals(sessionID)
-        async let questions = client.pendingQuestions(sessionID)
-        if let approvals = try? await approvals { pendingApprovals = approvals.items }
-        if let questions = try? await questions { pendingQuestions = questions.items }
+        guard let sessionID, interactionProtocol != .frames else { return }
+        do {
+            async let approvals = client.pendingApprovals(sessionID)
+            async let questions = client.pendingQuestions(sessionID)
+            let result = try await (approvals: approvals.items, questions: questions.items)
+            guard interactionProtocol != .frames else { return }
+            interactionProtocol = .legacyREST
+            interactions.replaceLegacy(approvals: result.approvals, questions: result.questions)
+        } catch KapError.http(status: 404, body: _) {
+            guard interactionProtocol != .frames else { return }
+            interactionProtocol = .frames
+            interactions.reset()
+        } catch {
+            guard interactionProtocol != .frames else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func scheduleInteractionRefresh() {
@@ -362,21 +391,19 @@ final class ChatModel {
 
     /// 仅旧 status 的 HTTP 404 可降级；正文请求、鉴权和其它错误仍正常报错。
     private func legacyStatus(_ sessionID: String) async throws -> SessionRuntimeStatus? {
-        guard !usesStateStream else { return nil }
+        guard !usesStateStream, !legacyStatusUnavailable else { return nil }
         do {
             return try await client.status(sessionID)
         } catch KapError.http(status: 404, body: _) {
+            legacyStatusUnavailable = true
             return nil
         }
     }
 
     private func apply(_ status: SessionRuntimeStatus) {
-        // agent 帧不含用量，usage 帧不含配置；不能互相清空。
-        if status.contextTokens != nil || status.contextUsage != nil {
-            contextTokens = status.contextTokens
-            maxContextTokens = status.maxContextTokens
-            contextUsage = status.contextUsage
-        }
+        contextTokens = status.contextTokens
+        maxContextTokens = status.maxContextTokens
+        contextUsage = status.contextUsage
         guard !holdsLocalConfig else { return }
         config = ComposerConfig(
             permission: status.permission ?? config.permission,
@@ -385,9 +412,26 @@ final class ChatModel {
         )
     }
 
-    /// `meta.agent` 里带着模型、思考强度、权限和上下文用量，随正文一起推过来。
+    private func apply(_ state: SessionAgentState) {
+        usesStateStream = true
+        agentActivity = state.status
+        guard !holdsLocalConfig else { return }
+        config = ComposerConfig(
+            permission: state.permission ?? config.permission,
+            modelID: state.model,
+            effort: state.thinkingLevel
+        )
+    }
+
+    private func apply(_ usage: SessionContextUsage) {
+        contextTokens = usage.contextTokens
+        maxContextTokens = usage.maxContextTokens
+        contextUsage = usage.ratio
+    }
+
+    /// 旧版 `meta.agent` 里带着配置和用量；新版全量 agent / usage 帧优先，不能被旧投影覆盖。
     private func applyAgentMeta() {
-        guard let agent = transcript.meta["agent"] else { return }
+        guard !usesStateStream, let agent = transcript.meta["agent"] else { return }
         if let tokens = agent["contextTokens"]?.intValue { contextTokens = tokens }
         if let max = agent["maxContextTokens"]?.intValue { maxContextTokens = max }
         if case let .number(usage)? = agent["contextUsage"] { contextUsage = usage }
@@ -599,44 +643,61 @@ final class ChatModel {
 
     func resolve(_ approval: ApprovalRequest, decision: ApprovalDecisionBody) async {
         guard let sessionID else { return }
-        // 先乐观移除，失败再放回去。
-        let snapshot = pendingApprovals
-        pendingApprovals.removeAll { $0.approvalID == approval.approvalID }
+        let snapshot = interactions
+        interactions.replaceLegacy(
+            approvals: snapshot.approvals.filter { $0.approvalID != approval.approvalID },
+            questions: snapshot.questions
+        )
         do {
-            let resolved = try await client.resolve(approval: approval.approvalID, in: sessionID, with: decision)
+            let resolved = if interactionProtocol == .frames {
+                try await client.resolveInteraction(approval: approval.approvalID, in: sessionID, with: decision)
+            } else {
+                try await client.resolve(approval: approval.approvalID, in: sessionID, with: decision)
+            }
             if !resolved { errorMessage = "这条确认已经在别处处理过了。" }
         } catch {
             errorMessage = error.localizedDescription
-            pendingApprovals = snapshot
+            interactions = snapshot
         }
     }
 
     func answer(_ question: QuestionRequest, answers: [String: QuestionAnswer]) async {
         guard let sessionID else { return }
-        let snapshot = pendingQuestions
-        pendingQuestions.removeAll { $0.questionID == question.questionID }
+        let snapshot = interactions
+        interactions.replaceLegacy(
+            approvals: snapshot.approvals,
+            questions: snapshot.questions.filter { $0.questionID != question.questionID }
+        )
+        let body = QuestionAnswerBody(answers: answers)
         do {
-            let resolved = try await client.answer(
-                question: question.questionID,
-                in: sessionID,
-                with: QuestionAnswerBody(answers: answers)
-            )
+            let resolved = if interactionProtocol == .frames {
+                try await client.answerInteraction(question: question.questionID, in: sessionID, with: body)
+            } else {
+                try await client.answer(question: question.questionID, in: sessionID, with: body)
+            }
             if !resolved { errorMessage = "这个问题已经在别处回答过了。" }
         } catch {
             errorMessage = error.localizedDescription
-            pendingQuestions = snapshot
+            interactions = snapshot
         }
     }
 
     func dismiss(_ question: QuestionRequest) async {
         guard let sessionID else { return }
-        let snapshot = pendingQuestions
-        pendingQuestions.removeAll { $0.questionID == question.questionID }
+        let snapshot = interactions
+        interactions.replaceLegacy(
+            approvals: snapshot.approvals,
+            questions: snapshot.questions.filter { $0.questionID != question.questionID }
+        )
         do {
-            try await client.dismiss(question: question.questionID, in: sessionID)
+            if interactionProtocol == .frames {
+                try await client.dismissInteraction(question: question.questionID, in: sessionID)
+            } else {
+                try await client.dismiss(question: question.questionID, in: sessionID)
+            }
         } catch {
             errorMessage = error.localizedDescription
-            pendingQuestions = snapshot
+            interactions = snapshot
         }
     }
 
@@ -646,6 +707,7 @@ final class ChatModel {
         switch signal {
         case .connected:
             connectionState = .live
+            legacyStatusUnavailable = false
             await refreshInteractions()
 
         case let .disconnected(reason):
@@ -656,10 +718,36 @@ final class ChatModel {
                 scheduleTranscriptReload()
             }
 
-        case let .runtimeState(eventSession, status):
+        case let .agentState(eventSession, state):
             guard eventSession == sessionID else { return }
-            usesStateStream = true
-            apply(status)
+            apply(state)
+
+        case let .agentUsage(eventSession, usage):
+            guard eventSession == sessionID else { return }
+            apply(usage)
+
+        case let .interaction(frame):
+            guard frame.sessionID == sessionID else { return }
+            if interactionProtocol != .frames {
+                interactionProtocol = .frames
+                interactions.reset()
+            }
+            interactions.apply(frame)
+
+        case let .interactionsReset(eventSession):
+            guard eventSession == sessionID else { return }
+            if errorMessage == subscriptionError { errorMessage = nil }
+            subscriptionError = nil
+            interactions.reset()
+            if interactionProtocol != .frames {
+                await refreshInteractions()
+            }
+
+        case let .subscriptionFailed(eventSession, message):
+            guard eventSession == sessionID else { return }
+            let text = "会话订阅暂时失败：\(message)。正在重试。"
+            subscriptionError = text
+            errorMessage = text
 
         case let .transcript(eventSession, event):
             guard eventSession == sessionID else { return }
@@ -671,7 +759,6 @@ final class ChatModel {
 
         case let .event(event):
             guard event.sessionID == nil || event.sessionID == sessionID else { return }
-            // 权限确认 / 提问的出现与消失：重拉 pending 列表。正文与状态全靠 transcript。
             if event.type.contains("approval") || event.type.contains("question")
                 || event.type.contains("interaction") || event.type == "event.session.work_changed" {
                 scheduleInteractionRefresh()

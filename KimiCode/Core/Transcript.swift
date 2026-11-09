@@ -37,6 +37,16 @@ struct TranscriptFrame: Decodable, Sendable, Equatable {
     var message: String?
 }
 
+struct TranscriptRetry: Decodable, Sendable, Equatable {
+    let failedAttempt: Int
+    let nextAttempt: Int
+    let maxAttempts: Int
+    let delayMs: Double
+    let errorName: String
+    let errorMessage: String
+    let statusCode: Int?
+}
+
 struct TranscriptStep: Decodable, Sendable, Equatable {
     let stepId: String
     let turnId: String
@@ -45,11 +55,12 @@ struct TranscriptStep: Decodable, Sendable, Equatable {
     var frames: [TranscriptFrame]
     var startedAt: String?
     var endedAt: String?
+    var retry: TranscriptRetry?
     var endReason: String?
     var endMessage: String?
 
     enum CodingKeys: String, CodingKey {
-        case stepId, turnId, ordinal, state, frames, startedAt, endedAt, endReason, endMessage
+        case stepId, turnId, ordinal, state, frames, startedAt, endedAt, retry, endReason, endMessage
     }
 
     init(stepId: String, turnId: String, ordinal: Int, state: String, frames: [TranscriptFrame]) {
@@ -70,6 +81,7 @@ struct TranscriptStep: Decodable, Sendable, Equatable {
             .compactMap(\.value) ?? []
         startedAt = try? c.decodeIfPresent(String.self, forKey: .startedAt)
         endedAt = try? c.decodeIfPresent(String.self, forKey: .endedAt)
+        retry = try? c.decodeIfPresent(TranscriptRetry.self, forKey: .retry)
         endReason = try? c.decodeIfPresent(String.self, forKey: .endReason)
         endMessage = try? c.decodeIfPresent(String.self, forKey: .endMessage)
     }
@@ -600,8 +612,16 @@ struct TranscriptState: Sendable {
 
     // MARK: 派生状态
 
-    /// `meta.activity == "turn"`：本轮还在跑。
-    var isTurnActive: Bool { meta["activity"]?.stringValue == "turn" }
+    /// 旧版读 `meta.activity`；2.5+ 删除了 meta，turn 自身状态仍可作为首帧前的回退。
+    var isTurnActive: Bool {
+        meta["activity"]?.stringValue == "turn"
+            || transcriptLastTurnIsActive
+    }
+
+    private var transcriptLastTurnIsActive: Bool {
+        guard let state = turns.last?.state else { return false }
+        return state == "running" || state == "queued"
+    }
 
     var phase: JSONValue? { meta["agent"]?["phase"] }
 }

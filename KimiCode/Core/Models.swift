@@ -488,7 +488,7 @@ enum PermissionMode: String, CaseIterable, Codable, Sendable, Identifiable {
     }
 }
 
-/// 旧版 REST status，以及新版扁平 WS agent / usage 帧的状态字段。
+/// 旧版 `GET /sessions/{id}/status`。2.5+ 的全量状态帧使用独立模型，避免混淆缺省语义。
 struct SessionRuntimeStatus: Decodable, Sendable {
     let busy: Bool?
     let model: String?
@@ -499,31 +499,8 @@ struct SessionRuntimeStatus: Decodable, Sendable {
     let maxContextTokens: Int?
     let contextUsage: Double?
 
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        busy = try container.decodeIfPresent(Bool.self, forKey: .busy)
-        model = try container.decodeIfPresent(String.self, forKey: .model)
-        thinkingLevel = try container.decodeIfPresent(String.self, forKey: .thinkingLevel)
-            ?? container.decodeIfPresent(String.self, forKey: .thinking)
-        let permissionValue = try container.decodeIfPresent(String.self, forKey: .permission)
-            ?? container.decodeIfPresent(String.self, forKey: .permissionMode)
-        permission = permissionValue.flatMap(PermissionMode.init)
-        planMode = try container.decodeIfPresent(Bool.self, forKey: .planMode)
-        contextTokens = try container.decodeIfPresent(Int.self, forKey: .contextTokens)
-        maxContextTokens = try container.decodeIfPresent(Int.self, forKey: .maxContextTokens)
-        if let usage = try container.decodeIfPresent(Double.self, forKey: .contextUsage) {
-            contextUsage = usage
-        } else if let contextTokens, let maxContextTokens, maxContextTokens > 0 {
-            contextUsage = Double(contextTokens) / Double(maxContextTokens)
-        } else {
-            contextUsage = nil
-        }
-    }
-
     enum CodingKeys: String, CodingKey {
         case busy, model, permission
-        case thinking
-        case permissionMode = "permission_mode"
         case thinkingLevel = "thinking_level"
         case planMode = "plan_mode"
         case contextTokens = "context_tokens"

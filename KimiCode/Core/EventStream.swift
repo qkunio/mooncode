@@ -26,19 +26,20 @@ enum StreamSignal: Sendable {
     case resyncRequired([String])
     /// 对话正文的增量（`subscribe_v2` 订阅的 `transcript.reset` / `transcript.ops`）。
     case transcript(sessionID: String, TranscriptWireEvent)
-    /// 新版服务端用扁平 agent / usage 帧替代 REST status。
-    case runtimeState(sessionID: String, SessionRuntimeStatus)
+    case agentState(sessionID: String, SessionAgentState)
+    case agentUsage(sessionID: String, SessionContextUsage)
+    case interaction(InteractionFrame)
+    /// 服务端在订阅确认后重发当前 pending 全量；先清空，再应用随后的 interaction 帧。
+    case interactionsReset(sessionID: String)
+    case subscriptionFailed(sessionID: String, message: String)
 }
 
 /// kap-server 的 WebSocket 事件通道。
 ///
-/// 两类订阅：
-///   - `subscribe`：会话事件。payload 是个很大的联合体，只严格解码信封（type/seq/epoch/session_id），
-///     上层只拿它当「确认 / 提问有变化」的信号。
-///   - `subscribe_v2`：对话正文（transcript）的逐字增量，`transcript.reset / ops` 单独解码后交给上层应用。
-///
-/// 游标：会话事件按 `seq`+`epoch` 记，重连时放进 `client_hello.cursors`；正文按批次 `seq` 记，
-/// 重连时放进 `transcript_since`，服务端补发缺的 ops，补不上就发 reset。
+/// 旧 `subscribe` 只服务于旧版原始事件与 seq/epoch 游标；所有版本都发送 `subscribe_v2`：
+/// transcript 逐字增量、2.4+ 的 interaction，以及 2.5+ 的全量 agent / usage 都由它驱动。
+/// 新版在订阅 ack 后重发 pending 和状态快照；正文另按 `transcript_since` 续传。
+/// 主动订阅只在 client_hello 后发送，ack 失败会退避重试。
 actor EventStream {
     private let endpoint: Endpoint
     private let tokenProvider: @Sendable () async -> String?
@@ -56,9 +57,14 @@ actor EventStream {
     private var subscribedSessions: Set<String> = []
     /// session_id → 已应用到的 transcript 批次序号（`transcript_since`）。nil = 还没拿到过。
     private var transcriptSubscriptions: [String: Int?] = [:]
+    private var pendingSubscriptionAcks: [String: PendingSubscription] = [:]
+    private var subscriptionRetries: [String: Task<Void, Never>] = [:]
+    private var subscriptionRetryAttempts: [String: Int] = [:]
     private var messageSeq = 0
     private var reconnectAttempt = 0
     private var isStopped = false
+    /// 只有 client_hello 已发出后才允许主动订阅，避免握手途中重复发送。
+    private var canSendSubscriptions = false
     /// 最后一次收到任何帧（含 pong）的时间，判断连接是不是已经悄悄断了。
     private var lastActivity: ContinuousClock.Instant?
     private var heartbeatMS = 10_000
@@ -69,6 +75,16 @@ actor EventStream {
     private struct Cursor: Encodable {
         let seq: Int
         var epoch: String?
+    }
+
+    private enum SubscriptionKind: String, Sendable {
+        case session
+        case transcript
+    }
+
+    private struct PendingSubscription: Sendable {
+        let kind: SubscriptionKind
+        let sessionID: String
     }
 
     init(
@@ -93,34 +109,32 @@ actor EventStream {
 
     func stop() {
         isStopped = true
+        canSendSubscriptions = false
         pumpTask?.cancel()
         backoffTask?.cancel()
         keepAliveTask?.cancel()
+        cancelSubscriptionRetries()
+        pendingSubscriptionAcks.removeAll()
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
         continuation?.finish()
         continuation = nil
     }
 
-    /// 订阅一条会话的事件。连接还没建立也可以调用，连上后会自动补发。
+    /// 旧版会话事件订阅。2.5+ 会忽略它，真正的正文与状态订阅走 subscribe_v2。
     func subscribe(to sessionID: String) async {
         subscribedSessions.insert(sessionID)
-        guard task != nil else { return }
-        await send([
-            "type": .string("subscribe"),
-            "id": .string(nextMessageID()),
-            "payload": .object([
-                "session_ids": .array([.string(sessionID)]),
-                "cursors": cursorPayload(for: [sessionID]),
-            ]),
-        ])
+        clearSubscriptionRetry(kind: .session, sessionID: sessionID)
+        guard canSendSubscriptions else { return }
+        await sendSessionSubscription(sessionID)
     }
 
     /// 订阅对话正文的逐字增量（与网页端 `sendTranscriptSubscribe` 一致：`main` 走 `delta` 级别）。
     /// `since` 是已经拿到的批次序号：服务端据此补发缺的 ops，补不上就发一个 `transcript.reset`。
     func subscribeTranscript(_ sessionID: String, since: Int?) async {
         transcriptSubscriptions[sessionID] = since
-        guard task != nil else { return }
+        clearSubscriptionRetry(kind: .transcript, sessionID: sessionID)
+        guard canSendSubscriptions else { return }
         await sendTranscriptSubscribe(sessionID)
     }
 
@@ -138,20 +152,30 @@ actor EventStream {
         if let since = transcriptSubscriptions[sessionID] ?? nil {
             payload["transcript_since"] = .object(["main": .number(Double(since))])
         }
+        let id = nextMessageID()
+        pendingSubscriptionAcks[id] = PendingSubscription(kind: .transcript, sessionID: sessionID)
         await send([
             "type": .string("subscribe_v2"),
-            "id": .string(nextMessageID()),
+            "id": .string(id),
             "payload": .object(payload),
         ])
     }
 
     func unsubscribe(from sessionID: String) async {
         subscribedSessions.remove(sessionID)
-        guard task != nil else { return }
+        transcriptSubscriptions.removeValue(forKey: sessionID)
+        clearSubscriptionRetry(kind: .session, sessionID: sessionID)
+        clearSubscriptionRetry(kind: .transcript, sessionID: sessionID)
+        guard canSendSubscriptions else { return }
         await send([
             "type": .string("unsubscribe"),
             "id": .string(nextMessageID()),
             "payload": .object(["session_ids": .array([.string(sessionID)])]),
+        ])
+        await send([
+            "type": .string("unsubscribe_v2"),
+            "id": .string(nextMessageID()),
+            "payload": .object(["session_id": .string(sessionID)]),
         ])
     }
 
@@ -213,6 +237,8 @@ actor EventStream {
     }
 
     private func connectOnce() async throws {
+        pendingSubscriptionAcks.removeAll()
+        cancelSubscriptionRetries()
         guard let url = endpoint.webSocketURL(clientID: clientID) else {
             throw KapError.http(status: 0, body: "无法构造 WS 地址")
         }
@@ -236,6 +262,7 @@ actor EventStream {
         task.resume()
 
         defer {
+            canSendSubscriptions = false
             keepAliveTask?.cancel()
             keepAliveTask = nil
             task.cancel(with: .goingAway, reason: nil)
@@ -263,6 +290,7 @@ actor EventStream {
                 "cursors": cursorPayload(for: subscribedSessions),
             ]),
         ])
+        canSendSubscriptions = true
 
         for sessionID in transcriptSubscriptions.keys {
             await sendTranscriptSubscribe(sessionID)
@@ -325,17 +353,40 @@ actor EventStream {
             return
 
         case "ack":
-            // subscribe / client_hello 的应答。resync_required 说明增量接不上了。
-            if let sessions = frame["payload"]?["resync_required"]?.arrayValue?.compactMap(\.stringValue),
+            let payload = frame["payload"]
+            // 旧版 subscribe / client_hello 的游标恢复仍保留；2.5+ 的 transcript_since 在 subscribe_v2 中处理。
+            if let sessions = payload?["resync_required"]?.arrayValue?.compactMap(\.stringValue),
                !sessions.isEmpty {
                 logger.info("需要重新拉取历史：\(sessions.joined(separator: ","))")
                 continuation?.yield(.resyncRequired(sessions))
             }
-            if let cursors = frame["payload"]?["cursors"]?.objectValue {
+            if let cursors = payload?["cursors"]?.objectValue {
                 for (sessionID, cursor) in cursors {
                     if let seq = cursor["seq"]?.intValue {
                         self.cursors[sessionID] = Cursor(seq: seq, epoch: cursor["epoch"]?.stringValue)
                     }
+                }
+            }
+            if let id = frame["id"]?.stringValue,
+               let pending = pendingSubscriptionAcks.removeValue(forKey: id) {
+                let code = frame["code"]?.intValue ?? 0
+                let accepted = payload?["accepted"]?.arrayValue?.compactMap(\.stringValue)
+                    ?? payload?["accepted_subscriptions"]?.arrayValue?.compactMap(\.stringValue)
+                    ?? []
+                let notFound = payload?["not_found"]?.arrayValue?.compactMap(\.stringValue) ?? []
+                if code == 0 {
+                    for sessionID in accepted {
+                        clearSubscriptionRetry(kind: pending.kind, sessionID: sessionID)
+                        continuation?.yield(.interactionsReset(sessionID: sessionID))
+                    }
+                }
+                let failed = code == 0 ? notFound : [pending.sessionID]
+                for sessionID in failed {
+                    scheduleSubscriptionRetry(kind: pending.kind, sessionID: sessionID)
+                    let message = frame["msg"]?.stringValue
+                        ?? payload?["msg"]?.stringValue
+                        ?? (code == 0 ? "会话尚未就绪" : "订阅失败（code \(code)）")
+                    continuation?.yield(.subscriptionFailed(sessionID: sessionID, message: message))
                 }
             }
             return
@@ -347,15 +398,37 @@ actor EventStream {
             continuation?.yield(.resyncRequired(sessions))
             return
 
-        case "agent", "usage":
+        case "agent":
             guard frame["agent_id"]?.stringValue == "main",
                   let sessionID = frame["session_id"]?.stringValue,
                   let data = try? JSONEncoder().encode(frame) else { return }
             do {
-                let status = try JSONDecoder().decode(SessionRuntimeStatus.self, from: data)
-                continuation?.yield(.runtimeState(sessionID: sessionID, status))
+                let state = try JSONDecoder().decode(SessionAgentState.self, from: data)
+                continuation?.yield(.agentState(sessionID: sessionID, state))
             } catch {
-                logger.error("状态帧解析失败：\(error.localizedDescription)")
+                logger.error("agent 状态帧解析失败：\(error.localizedDescription)")
+            }
+            return
+
+        case "usage":
+            guard frame["agent_id"]?.stringValue == "main",
+                  let sessionID = frame["session_id"]?.stringValue,
+                  let data = try? JSONEncoder().encode(frame) else { return }
+            do {
+                let usage = try JSONDecoder().decode(SessionContextUsage.self, from: data)
+                continuation?.yield(.agentUsage(sessionID: sessionID, usage))
+            } catch {
+                logger.error("usage 状态帧解析失败：\(error.localizedDescription)")
+            }
+            return
+
+        case "interaction":
+            guard let data = try? JSONEncoder().encode(frame) else { return }
+            do {
+                let interaction = try JSONDecoder().decode(InteractionFrame.self, from: data)
+                continuation?.yield(.interaction(interaction))
+            } catch {
+                logger.error("interaction 帧解析失败：\(error.localizedDescription)")
             }
             return
 
@@ -400,6 +473,63 @@ actor EventStream {
             }
         }
         continuation?.yield(.event(event))
+    }
+
+    private func scheduleSubscriptionRetry(kind: SubscriptionKind, sessionID: String) {
+        let key = retryKey(kind: kind, sessionID: sessionID)
+        guard !isStopped, subscriptionRetries[key] == nil else { return }
+        let attempt = subscriptionRetryAttempts[key] ?? 0
+        let delayMS = attempt >= 8 ? 30_000 : min(4_000, 250 * (1 << min(attempt, 4)))
+        subscriptionRetries[key] = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(delayMS)) } catch { return }
+            guard !Task.isCancelled else { return }
+            await self?.fireSubscriptionRetry(kind: kind, sessionID: sessionID)
+        }
+    }
+
+    private func fireSubscriptionRetry(kind: SubscriptionKind, sessionID: String) async {
+        let key = retryKey(kind: kind, sessionID: sessionID)
+        subscriptionRetries[key] = nil
+        guard !isStopped, canSendSubscriptions else { return }
+        subscriptionRetryAttempts[key, default: 0] += 1
+        switch kind {
+        case .session:
+            guard subscribedSessions.contains(sessionID) else { return }
+            await sendSessionSubscription(sessionID)
+        case .transcript:
+            guard transcriptSubscriptions[sessionID] != nil else { return }
+            await sendTranscriptSubscribe(sessionID)
+        }
+    }
+
+    private func sendSessionSubscription(_ sessionID: String) async {
+        let id = nextMessageID()
+        pendingSubscriptionAcks[id] = PendingSubscription(kind: .session, sessionID: sessionID)
+        await send([
+            "type": .string("subscribe"),
+            "id": .string(id),
+            "payload": .object([
+                "session_ids": .array([.string(sessionID)]),
+                "cursors": cursorPayload(for: [sessionID]),
+            ]),
+        ])
+    }
+
+    private func clearSubscriptionRetry(kind: SubscriptionKind, sessionID: String) {
+        let key = retryKey(kind: kind, sessionID: sessionID)
+        subscriptionRetries[key]?.cancel()
+        subscriptionRetries[key] = nil
+        subscriptionRetryAttempts[key] = nil
+    }
+
+    private func cancelSubscriptionRetries() {
+        for task in subscriptionRetries.values { task.cancel() }
+        subscriptionRetries.removeAll()
+        subscriptionRetryAttempts.removeAll()
+    }
+
+    private func retryKey(kind: SubscriptionKind, sessionID: String) -> String {
+        "\(kind.rawValue):\(sessionID)"
     }
 
     private func send(_ payload: [String: JSONValue]) async {

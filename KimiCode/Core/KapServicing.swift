@@ -51,6 +51,10 @@ protocol KapServicing: Sendable {
     func pendingQuestions(_ sessionID: String) async throws -> QuestionList
     func answer(question questionID: String, in sessionID: String, with body: QuestionAnswerBody) async throws -> Bool
     func dismiss(question questionID: String, in sessionID: String) async throws
+    /// 2.4+ 的统一 interaction 回写。默认回退到旧接口，体验模式无需实现新协议。
+    func resolveInteraction(approval approvalID: String, in sessionID: String, with decision: ApprovalDecisionBody) async throws -> Bool
+    func answerInteraction(question questionID: String, in sessionID: String, with body: QuestionAnswerBody) async throws -> Bool
+    func dismissInteraction(question questionID: String, in sessionID: String) async throws
 }
 
 extension KapClient: KapServicing {}
@@ -66,5 +70,17 @@ extension KapServicing {
 
     func transcript(_ sessionID: String, beforeTurn: String?) async throws -> TranscriptPage {
         try await transcript(sessionID, pageSize: 30, beforeTurn: beforeTurn)
+    }
+
+    func resolveInteraction(approval approvalID: String, in sessionID: String, with decision: ApprovalDecisionBody) async throws -> Bool {
+        try await resolve(approval: approvalID, in: sessionID, with: decision)
+    }
+
+    func answerInteraction(question questionID: String, in sessionID: String, with body: QuestionAnswerBody) async throws -> Bool {
+        try await answer(question: questionID, in: sessionID, with: body)
+    }
+
+    func dismissInteraction(question questionID: String, in sessionID: String) async throws {
+        try await dismiss(question: questionID, in: sessionID)
     }
 }

@@ -362,6 +362,36 @@ struct KapClient: Sendable {
         }
     }
 
+    // MARK: 统一 interaction（2.4+）
+
+    func resolveInteraction(approval approvalID: String, in sessionID: String, with decision: ApprovalDecisionBody) async throws -> Bool {
+        try await respondInteraction(approvalID, in: sessionID, body: .approval(decision))
+    }
+
+    func answerInteraction(question questionID: String, in sessionID: String, with body: QuestionAnswerBody) async throws -> Bool {
+        try await respondInteraction(questionID, in: sessionID, body: .question(body))
+    }
+
+    func dismissInteraction(question questionID: String, in sessionID: String) async throws {
+        do {
+            let _: InteractionOutcome = try await post(
+                "sessions/\(sessionID)/interactions/\(questionID)",
+                body: InteractionResponseBody.dismissQuestion
+            )
+        } catch let KapError.api(code, _) where code == KapErrorCode.approvalAlreadyResolved {
+            // 新版重复处理统一返回 40902，与旧版“已被别处处理”等价。
+        }
+    }
+
+    private func respondInteraction(_ id: String, in sessionID: String, body: InteractionResponseBody) async throws -> Bool {
+        do {
+            let _: InteractionOutcome = try await post("sessions/\(sessionID)/interactions/\(id)", body: body)
+            return true
+        } catch let KapError.api(code, _) where code == KapErrorCode.approvalAlreadyResolved {
+            return false
+        }
+    }
+
     // MARK: 底层
 
     func get<Response: Decodable>(
