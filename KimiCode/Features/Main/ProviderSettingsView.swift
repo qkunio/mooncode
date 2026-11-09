@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 模型面板右上角 ⚙︎：「模型配置」。最上面是新会话的默认配置（默认模型 / 权限 / 思考，照网页端「Agent 默认值」），
+/// 模型面板右上角 ⚙︎：「模型配置」。默认模型在侧栏个人面板，这里保留默认权限 / 思考；
 /// 下面是模型供应商（照网页端「供应商管理」）：编辑 / 手动添加 / 从目录（models.dev）添加。改动直接写进电脑上的配置。
 struct ProviderSettingsSheet: View {
     let client: any KapServicing
@@ -281,7 +281,7 @@ private struct StatusBadge: View {
 
 // MARK: - 默认配置
 
-/// 新会话的默认模型 / 权限 / 思考（网页端「Agent 默认值」的前三项）。每改一项立刻 `POST /config`。
+/// 新会话的默认权限 / 思考。默认模型已挪到侧栏个人面板；每项仍单独 `POST /config`。
 private struct DefaultsSettingsView: View {
     let client: any KapServicing
     let models: [ModelInfo]
@@ -301,41 +301,8 @@ private struct DefaultsSettingsView: View {
 
     private var defaultModel: ModelInfo? { models.first { $0.model == config?.defaultModel } }
 
-    /// 配置里的默认模型这台电脑上已经没有（或写错了）时照原样标出来，别显示成「未设置」。
-    private var defaultModelLabel: String {
-        if let defaultModel { return defaultModel.name }
-        if let raw = config?.defaultModel, !raw.isEmpty { return "\(raw)（不可用）" }
-        return "未设置"
-    }
-
-    /// 按来源分组，同模型面板。
-    private var groups: [(label: String, models: [ModelInfo])] {
-        var result: [(label: String, models: [ModelInfo])] = []
-        for model in models {
-            if let index = result.firstIndex(where: { $0.label == model.providerLabel }) {
-                result[index].models.append(model)
-            } else {
-                result.append((model.providerLabel, [model]))
-            }
-        }
-        return result
-    }
-
     var body: some View {
         Form {
-            Section {
-                // 不用 `.navigationLink` 的 Picker：它会把分组摊平，组名变成可选的行、勾号也会错位。
-                NavigationLink {
-                    DefaultModelList(groups: groups, selected: config?.defaultModel) { id in
-                        save(ServerConfigPatch(defaultModel: id))
-                    }
-                } label: {
-                    LabeledContent("默认模型", value: defaultModelLabel)
-                }
-            } footer: {
-                Text("新会话会优先使用这个模型。")
-            }
-
             Section {
                 let mode = config?.defaultPermissionMode ?? .manual
                 LabeledContent("默认权限") {
@@ -430,12 +397,24 @@ private struct DefaultsSettingsView: View {
 }
 
 /// 默认模型列表：按来源分组（组名是分组标题），勾选当前默认，点一下保存并返回。
-private struct DefaultModelList: View {
-    let groups: [(label: String, models: [ModelInfo])]
+struct DefaultModelList: View {
+    let models: [ModelInfo]
     let selected: String?
     let select: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
+
+    private var groups: [(label: String, models: [ModelInfo])] {
+        var result: [(label: String, models: [ModelInfo])] = []
+        for model in models {
+            if let index = result.firstIndex(where: { $0.label == model.providerLabel }) {
+                result[index].models.append(model)
+            } else {
+                result.append((model.providerLabel, [model]))
+            }
+        }
+        return result
+    }
 
     var body: some View {
         List {

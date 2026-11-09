@@ -46,6 +46,7 @@ enum KapErrorCode {
     static let notFound = 40401
     static let fileNotFound = 40409
     static let fileTooLarge = 41302
+    static let filePathEscapesWorkspace = 41304
     static let approvalNotFound = 40404
     static let approvalAlreadyResolved = 40902
     static let remoteControlAlreadyRunning = 40903
@@ -77,6 +78,8 @@ enum KapError: LocalizedError {
                 return "电脑上这个模型的凭证无效或已过期。请在电脑上更新，或换一个模型。\n\(message)"
             case KapErrorCode.modelNotResolved:
                 return "电脑上找不到这个模型的配置，可能已被删除。请换一个模型。\n\(message)"
+            case KapErrorCode.filePathEscapesWorkspace:
+                return "无法访问此文件：路径超出当前工作区，或符号链接指向工作区外。请选择工作区内的文件。"
             default:
                 return "\(message)（code \(code)）"
             }

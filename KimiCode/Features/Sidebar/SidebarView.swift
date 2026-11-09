@@ -1,35 +1,32 @@
 import SwiftUI
 
-/// 侧栏：
-///   Moon Code
-///   📁+ 添加文件夹
-///   📁 Folder1                        (+)
-///        Session1
-///        Session2
-///   📁 Folder2                        (+)
-///   ╭ (头像) 昵称 >            [退出登录] ╮   ← 悬浮胶囊卡片，和输入框同一种玻璃
-///   ║  💻 MacBook-Pro        ✓           ║   ← 点整条（退出除外）展开设备面板：切换后自动收起 / 刷新
-///   ╰────────────────────────────────────╯
+/// 侧栏：Moon Code（可显示横排设备）、添加文件夹、会话列表，底部是个人入口。
+/// 个人面板里管理默认模型 / 强度、设备显示偏好和退出登录。
 
 struct SidebarView: View {
     let close: () -> Void
+    let isVisible: Bool
 
     @Environment(AppModel.self) private var app
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("kimi.showsDevicesInSidebar") private var showsDevicesInSidebar = true
     @State private var collapsed: Set<String> = []
-    @State private var isConfirmingSignOut = false
     @State private var isAddingWorkspace = false
+    @State private var isShowingAccount = false
     @State private var renaming: SessionSummary?
     @State private var renameText = ""
     @State private var deleting: SessionSummary?
-    /// 账号卡展开设备面板。
-    @State private var showsDevices = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
+
+            if showsDevicesInSidebar {
+                DeviceStrip()
+                    .padding(.top, 14)
+            }
 
             addFolderRow
                 .padding(.horizontal, 20)
@@ -68,9 +65,18 @@ struct SidebarView: View {
         } message: { session in
             Text("将永久删除「\(session.displayTitle)」的全部对话记录，无法恢复。工作区里的文件和代码改动不受影响。")
         }
-        .alert(app.isDemoMode ? "退出体验模式？" : "是否退出登录？", isPresented: $isConfirmingSignOut) {
-            Button("取消", role: .cancel) {}
-            Button("退出", role: .destructive) { app.signOut() }
+        .sheet(isPresented: $isShowingAccount) {
+            AccountSheet(showsDevicesInSidebar: $showsDevicesInSidebar)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .task(id: isVisible && showsDevicesInSidebar) {
+            guard isVisible && showsDevicesInSidebar else { return }
+            await app.refreshDevices(silent: true)
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                await app.refreshDevices(silent: true)
+            }
         }
     }
 
@@ -89,128 +95,26 @@ struct SidebarView: View {
 
     // MARK: 底部账号
 
-    /// 用户栏标题：直接显示当前设备名，没连设备时引导选择。
-    private var accountTitle: String {
-        app.currentDevice?.shortName ?? "选择设备"
-    }
-
-    /// 悬浮的胶囊卡片（参考输入框：同一种玻璃，列表从它下面滚过去）。
-    /// 点整条（退出按钮除外）展开/收起设备面板：在线设备可切换、离线置灰，底部有刷新。
     private var accountCard: some View {
-        VStack(spacing: 0) {
+        Button { isShowingAccount = true } label: {
             HStack(spacing: 12) {
-                Button {
-                    withAnimation(.snappy) {
-                        showsDevices.toggle()
-                    }
-                    // 每次展开顺手拉一次最新状态。
-                    if showsDevices { Task { await app.refreshDevices() } }
-                } label: {
-                    HStack(spacing: 12) {
-                        Avatar(url: app.user?.avatarURL)
-                        HStack(spacing: 4) {
-                            Text(accountTitle)
-                                .font(.body.weight(.semibold))
-                                .lineLimit(1)
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .rotationEffect(.degrees(showsDevices ? 90 : 0))
-                        }
-                        Spacer(minLength: 8)
-                    }
-                    // 上下留白也算在点击范围里，行高与退出按钮对齐。
-                    .frame(minHeight: 38)
-                    .padding(.leading, 10)
-                    .padding(.vertical, 8)
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("设备")
-                .accessibilityHint(showsDevices ? "收起设备面板" : "展开设备面板")
-                Button {
-                    isConfirmingSignOut = true
-                } label: {
-                    Image(systemName: "rectangle.portrait.and.arrow.right")
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(.red)
-                        .frame(width: 38, height: 38)
-                        .contentShape(.circle)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(app.isDemoMode ? "退出体验" : "退出登录")
+                Avatar(url: app.user?.avatarURL)
+                Text(app.user?.displayName ?? "Kimi 用户")
+                    .font(.body.weight(.semibold))
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
             }
-            .padding(.trailing, 8)
-
-            if showsDevices {
-                devicePanel
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
-                    .transition(.opacity)
-            }
+            .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(.rect)
         }
-        .glassEffect(in: showsDevices ? AnyShape(.rect(cornerRadius: 28)) : AnyShape(.capsule))
-    }
-
-    private var devicePanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Divider()
-                .padding(.bottom, 4)
-
-            ForEach(app.devices) { device in
-                Button {
-                    // 选完（包括点当前这台）就收起面板。
-                    withAnimation(.snappy) { showsDevices = false }
-                    Task { await app.select(device) }
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: device.symbolName)
-                            .frame(width: 22)
-                        Text(device.shortName)
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        if device.deviceID == app.endpoint?.deviceID {
-                            Image(systemName: "checkmark")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Palette.kimi)
-                        } else if !device.isOnline {
-                            Text("离线")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(device.isOnline ? .primary : .tertiary)
-                    .frame(minHeight: 36)
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .disabled(!device.isOnline)
-            }
-
-            Button {
-                Task { await app.refreshDevices() }
-            } label: {
-                HStack(spacing: 10) {
-                    Group {
-                        if app.isLoadingDevices {
-                            ProgressView().controlSize(.mini)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                    .frame(width: 22)
-                    Text("刷新设备")
-                    Spacer(minLength: 4)
-                }
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-                .frame(minHeight: 36)
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .disabled(app.isLoadingDevices)
-        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("账号")
+        .glassEffect(in: .capsule)
     }
 
     /// 选一个电脑上的文件夹加成工作区（官方网页端「添加工作区」）。样式与下面的文件夹行一致。
@@ -252,7 +156,7 @@ struct SidebarView: View {
             .padding(.bottom, 16)
         }
         .refreshable {
-            await app.refreshDevices()
+            if !showsDevicesInSidebar { await app.refreshDevices() }
             await app.refreshSidebar()
         }
     }
@@ -368,8 +272,9 @@ private struct SessionStateDot: View {
 
 // MARK: - 头像
 
-private struct Avatar: View {
+struct Avatar: View {
     let url: URL?
+    var size: CGFloat = 36
 
     var body: some View {
         AsyncImage(url: url) { phase in
@@ -381,7 +286,7 @@ private struct Avatar: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .frame(width: 36, height: 36)
+        .frame(width: size, height: size)
         .clipShape(.circle)
         .accessibilityHidden(true)
     }

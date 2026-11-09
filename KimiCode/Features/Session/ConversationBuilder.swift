@@ -333,7 +333,9 @@ enum ConversationBuilder {
                     ensureAssistant("\(turn.turnId):notice", turn: turn, createdAt: turnStart)
                     current?.blocks.append(ConversationBuilder.notification(id: "\(turn.turnId):input", text: prompt, task: nil))
                 } else if ConversationBuilder.isUserVisible(turn.originKind) {
-                    let split = ConversationBuilder.splitMentions(ConversationBuilder.stripInjected(prompt))
+                    let split = ConversationBuilder.splitMentions(ConversationBuilder.stripInjected(
+                        prompt, attachmentCount: attachments.count
+                    ))
                     entries.append(ChatEntry(id: "\(turn.turnId):input", kind: .user(UserEntry(
                         id: "\(turn.turnId):input",
                         text: split.text,
@@ -423,7 +425,9 @@ enum ConversationBuilder {
                     .map(ConversationBuilder.attachmentRef)
                 guard !text.isEmpty || !frameAttachments.isEmpty else { return }
                 flush()
-                let split = ConversationBuilder.splitMentions(ConversationBuilder.stripInjected(text))
+                let split = ConversationBuilder.splitMentions(ConversationBuilder.stripInjected(
+                    text, attachmentCount: frameAttachments.count
+                ))
                 entries.append(ChatEntry(id: frame.frameId, kind: .user(UserEntry(
                     id: frame.frameId,
                     text: split.text,
@@ -527,7 +531,8 @@ enum ConversationBuilder {
     }
 
     /// 去掉系统注入的 `<system-reminder>` 之类标签块；被 `<prompt>` 包着的只取里面（官方 `LE`）。
-    static func stripInjected(_ text: String) -> String {
+    /// 附件的 `Attached file` 说明给模型看路径，不作为用户正文显示；最多清理实际附件数，避免误删用户自己写的文字。
+    static func stripInjected(_ text: String, attachmentCount: Int = 0) -> String {
         var result = text
         if let open = result.range(of: "<prompt>\n"), let close = result.range(of: "\n</prompt>", options: .backwards),
            open.upperBound <= close.lowerBound {
@@ -539,7 +544,15 @@ enum ConversationBuilder {
                 result.removeSubrange(open.lowerBound ..< close.upperBound)
             }
         }
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+        var remainingNotices = attachmentCount
+        let lines = result.components(separatedBy: "\n").filter { line in
+            let candidate = line.hasSuffix("\r") ? String(line.dropLast()) : line
+            let notice = /^Attached file ".+" \([^()\r\n]+, [0-9]+ bytes\): .+ — open it with the Read tool$/
+            guard remainingNotices > 0, candidate.wholeMatch(of: notice) != nil else { return true }
+            remainingNotices -= 1
+            return false
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// `EE`：工具输出统一成若干行。

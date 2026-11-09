@@ -218,8 +218,6 @@ struct UserTurnView: View {
     @State private var isClamped = false
     /// 复制 / 撤回 / 时间那一行默认收着，点气泡才出来。
     @State private var showsActions = false
-    /// 这次按下已经按满长按时长（在选字）：松手时的点击不算。
-    @State private var pressedLong = false
 
     /// 官方 `Bq = 10`：超过 10 行折起来，给「展开 / 收起」。
     private static let clampLines = 10
@@ -269,12 +267,6 @@ struct UserTurnView: View {
             .userBubble()
             .contentShape(.rect(cornerRadius: Self.bubbleRadius, style: .continuous))
             .onTapGesture { toggleActions() }
-            .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.3)
-                    // 每次按下先清掉：上次按满了却没走到点击（比如手指滑走了）时，标记不能留到下一次。
-                    .onChanged { _ in pressedLong = false }
-                    .onEnded { _ in pressedLong = true }
-            )
             .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in
                 let maxWidth = width * 0.88
                 if entry.text.isEmpty, !entry.attachments.isEmpty, entry.attachments.allSatisfy(\.isImage) {
@@ -292,14 +284,11 @@ struct UserTurnView: View {
     }
 
     private func toggleActions() {
-        // SwiftUI 的 TapGesture 不限按住多久，长按选字松手时也会触发：按满长按时长的那次松手不算点击。
-        // 文字和气泡各挂了一个点击，同一次松手可能两个都来，等它们都过去再复位。
-        if pressedLong {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { pressedLong = false }
-            return
+        // 等系统先更新长按选区，再判断这一下是不是选字；不用额外的 LongPressGesture 抢列表滚动。
+        DispatchQueue.main.async {
+            guard !SelectableTextView.isSelecting else { return }
+            withAnimation(.disclosure) { showsActions.toggle() }
         }
-        guard !SelectableTextView.isSelecting else { return }
-        withAnimation(.disclosure) { showsActions.toggle() }
     }
 
     private var actions: some View {

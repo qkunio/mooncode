@@ -23,6 +23,7 @@ final class AppModel {
     // composer 用
     private(set) var models: [ModelInfo] = []
     private(set) var defaultModelID: String?
+    private(set) var defaultThinking: ServerConfigDefaults.ThinkingConfig?
 
     /// 主页正在看的对话。
     private(set) var chat: ChatModel?
@@ -88,7 +89,7 @@ final class AppModel {
         if let pick { await select(pick) }
     }
 
-    func refreshDevices() async {
+    func refreshDevices(silent: Bool = false) async {
         if isDemoMode {
             devices = DemoClient.devices
             isLoadingDevices = false
@@ -96,9 +97,9 @@ final class AppModel {
             return
         }
         guard auth.isSignedIn else { return }
-        isLoadingDevices = true
+        if !silent { isLoadingDevices = true }
         defer {
-            isLoadingDevices = false
+            if !silent { isLoadingDevices = false }
             hasLoadedDevices = true
         }
         do {
@@ -155,12 +156,12 @@ final class AppModel {
         // 电脑上配好的模型全都列出（含第三方 provider）；「Kimi 订阅」组排最前，组内顺序沿用服务端返回的。
         let all = (try? await models) ?? []
         self.models = all.filter(\.isKimiSubscription) + all.filter { !$0.isKimiSubscription }
-        self.defaultModelID = (try? await config)?.defaultModel
+        if let defaults = try? await config { apply(defaults) }
         if let value = try? await user { self.user = value }
         reconcileDraft()
     }
 
-    /// 供应商改完后重拉模型列表和默认模型（composer / 模型面板跟着变）。
+    /// 供应商改完后重拉模型列表和默认配置（composer / 模型面板跟着变）。
     func reloadModels() async {
         guard let client else { return }
         async let models = client.models()
@@ -168,8 +169,28 @@ final class AppModel {
         if let all = try? await models {
             self.models = all.filter(\.isKimiSubscription) + all.filter { !$0.isKimiSubscription }
         }
-        if let config = try? await config { self.defaultModelID = config.defaultModel }
+        if let defaults = try? await config { apply(defaults) }
         reconcileDraft()
+    }
+
+    /// 个人面板只改新会话的默认模型 / 强度，不改当前会话的模型、思考或权限。
+    func updateDefaultModel(_ id: String) async throws {
+        guard let client else { return }
+        let updated = try await client.updateConfig(ServerConfigPatch(defaultModel: id))
+        apply(updated)
+    }
+
+    func updateDefaultThinking(_ option: String) async throws {
+        guard let client else { return }
+        let updated = try await client.updateConfig(ServerConfigPatch(
+            thinking: ServerConfigDefaults.ThinkingConfig(option: option)
+        ))
+        apply(updated)
+    }
+
+    private func apply(_ defaults: ServerConfigDefaults) {
+        defaultModelID = defaults.defaultModel
+        defaultThinking = defaults.thinking
     }
 
     /// 打开侧栏时刷新：会话状态（忙/待确认）变化最快。

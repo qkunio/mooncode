@@ -76,6 +76,15 @@ import Foundation
         let completed = try TranscriptState(page: decode(TranscriptPage.self, from: completedPage))
         precondition(!completed.isTurnActive)
 
-        print("PASS: legacy status, strict agent/usage, running state, interaction frames and response bodies")
+        let modelPatch = try object(ServerConfigPatch(defaultModel: "kimi-code/k3"))
+        precondition(modelPatch.count == 1 && modelPatch["default_model"] as? String == "kimi-code/k3")
+        let thinkingPatch = try object(ServerConfigPatch(
+            thinking: ServerConfigDefaults.ThinkingConfig(option: "high")
+        ))
+        precondition(thinkingPatch.count == 1)
+        let thinking = thinkingPatch["thinking"] as? [String: Any]
+        precondition(thinking?["enabled"] as? Bool == true && thinking?["effort"] as? String == "high")
+
+        print("PASS: legacy status, strict agent/usage, running state, interaction frames, response bodies and default config patches")
     }
 }

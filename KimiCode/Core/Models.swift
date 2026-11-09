@@ -640,6 +640,27 @@ extension FsEntry {
         isBinary = nil
     }
 
+    /// 正文里的本地文件链接；网页、锚点、协议相对地址等仍交给系统打开。
+    init?(markdownLink url: URL) {
+        let raw = url.absoluteString
+        guard !raw.hasPrefix("#"), !raw.hasPrefix("?"), !raw.hasPrefix("//") else { return nil }
+        let windowsPath = raw.firstMatch(of: /^[a-zA-Z]:(?:[\\\/]|%5[cC])/) != nil
+        if let scheme = url.scheme, scheme != "file", !windowsPath { return nil }
+        if url.scheme == "file", let host = url.host, !host.isEmpty, host != "localhost" { return nil }
+
+        let path: String
+        if windowsPath {
+            let target = raw.split(whereSeparator: { $0 == "#" || $0 == "?" }).first.map(String.init) ?? raw
+            let decoded = target.removingPercentEncoding ?? target
+            path = decoded.removingPercentEncoding ?? decoded
+        } else {
+            path = url.path(percentEncoded: false)
+        }
+        guard !path.isEmpty, !path.hasSuffix("/"), !path.hasSuffix("\\"),
+              let name = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last else { return nil }
+        self.init(path: path, name: String(name))
+    }
+
     /// 网页端「提及」文件的写法（`rv`）：`[名字](相对路径)`。名字转义 `% & < > [ ] \` 和换行（`a6`），
     /// 路径逐段把 ASCII 里非 unreserved 的字符百分号编码，中文等原样保留（`i9e` / `ug`）。
     var mentionMarkdown: String {

@@ -35,6 +35,7 @@ struct SelectableText: UIViewRepresentable {
     func updateUIView(_ view: SelectableTextView, context: Context) {
         let coordinator = context.coordinator
         coordinator.addToComposer = context.environment.addToComposer
+        coordinator.openFilePreview = context.environment.openFilePreview
         let colorScheme = context.environment.colorScheme
         let key = Coordinator.Key(content: content, dynamicTypeSize: context.environment.dynamicTypeSize, colorScheme: colorScheme)
         if coordinator.key != key {
@@ -94,6 +95,7 @@ struct SelectableText: UIViewRepresentable {
         var key: Key?
         var sizes: [SizeKey: CGSize] = [:]
         var addToComposer: ((String) -> Void)?
+        var openFilePreview: ((FsEntry) -> Void)?
 
         /// 长按菜单：拷贝 → 添加到会话框 → 搜索网页 排最前，「查询」去掉，其余照系统的。
         /// 没有输入框（拿不到回调）时原样不动。
@@ -144,13 +146,17 @@ struct SelectableText: UIViewRepresentable {
             return UITextItem.MenuConfiguration(menu: UIMenu(children: [copy]))
         }
 
-        /// 点一下公式不做事（默认会当图片处理）。
+        /// 点一下公式不做事（默认会当图片处理）；本地文件链接用对话的预览上拉栏，网页仍走系统。
         func textView(
             _ textView: UITextView,
             primaryActionFor textItem: UITextItem,
             defaultAction: UIAction
         ) -> UIAction? {
             if case let .textAttachment(attachment) = textItem.content, attachment is MathAttachment { return nil }
+            if case let .link(url) = textItem.content,
+               let entry = FsEntry(markdownLink: url), let openFilePreview {
+                return UIAction { _ in openFilePreview(entry) }
+            }
             return defaultAction
         }
 

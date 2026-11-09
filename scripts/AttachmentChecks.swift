@@ -277,6 +277,45 @@ struct AttachmentChecks {
         let folderMention = ConversationBuilder.splitMentions("[docs](docs/)").mentions.first!
         precondition(folderMention.previewEntry == nil)
 
+        let localLink = FsEntry(markdownLink: URL(string: "docs/hello%20world.md#L12")!)
+        precondition(localLink?.path == "docs/hello world.md" && localLink?.name == "hello world.md")
+        let parsedMarkdown = try AttributedString(markdown: "[说明](docs/hello%20world.md#L12)")
+        let parsedLink = parsedMarkdown.runs.compactMap(\.link).first!
+        precondition(FsEntry(markdownLink: parsedLink) == localLink)
+        let absoluteLink = FsEntry(markdownLink: URL(string: "file:///tmp/Moon%20Code.md")!)
+        precondition(absoluteLink?.path == "/tmp/Moon Code.md" && absoluteLink?.name == "Moon Code.md")
+        let windowsLink = FsEntry(markdownLink: URL(string: #"C:\Projects\Moon%20Code.md"#)!)
+        precondition(windowsLink?.path == #"C:\Projects\Moon Code.md"# && windowsLink?.name == "Moon Code.md")
+        let windowsSlashLink = FsEntry(markdownLink: URL(string: "C:/Projects/Moon%20Code.md")!)
+        precondition(windowsSlashLink?.path == "C:/Projects/Moon Code.md")
+        for external in ["https://kimi.com/README.md", "//kimi.com/README.md", "#section", "mailto:dev@kimi.com"] {
+            precondition(FsEntry(markdownLink: URL(string: external)!) == nil)
+        }
+        precondition(FsEntry(markdownLink: URL(string: "docs/")!) == nil)
+
+        let notice = #"Attached file "简历.pdf" (application/pdf, 265902 bytes): /Users/test/.kimi-code/sessions/attachments/f_1-简历.pdf — open it with the Read tool"#
+        precondition(ConversationBuilder.stripInjected(notice, attachmentCount: 1).isEmpty)
+        precondition(ConversationBuilder.stripInjected(notice + "\n请总结这份简历", attachmentCount: 1) == "请总结这份简历")
+        precondition(ConversationBuilder.stripInjected(notice + "\n" + notice, attachmentCount: 1) == notice)
+        precondition(ConversationBuilder.stripInjected(notice, attachmentCount: 0) == notice)
+        let encodedNotice = String(data: try JSONEncoder().encode(notice), encoding: .utf8)!
+        let attachmentPage = try JSONDecoder().decode(TranscriptPage.self, from: Data("""
+            {"items":[{"kind":"turn","turnId":"t_1","ordinal":1,"state":"completed",\
+            "prompt":\(encodedNotice),"attachmentIds":["file-1"],"steps":[]}],\
+            "attachments":[{"attachmentId":"file-1","mediaType":"application/pdf","name":"简历.pdf","size":265902}],\
+            "meta":{},"has_more":false}
+            """.utf8))
+        let attachmentUsers = ConversationBuilder.build(TranscriptState(page: attachmentPage)).compactMap { entry -> UserEntry? in
+            if case let .user(user) = entry.kind { return user }
+            return nil
+        }
+        precondition(attachmentUsers.count == 1)
+        precondition(attachmentUsers[0].text.isEmpty && attachmentUsers[0].attachments.map(\.name) == ["简历.pdf"])
+        let outside = KapError.api(code: KapErrorCode.filePathEscapesWorkspace, message: #"path "../secret" escapes workspace"#)
+        precondition(outside.localizedDescription == "无法访问此文件：路径超出当前工作区，或符号链接指向工作区外。请选择工作区内的文件。")
+        let other = KapError.api(code: KapErrorCode.fileNotFound, message: "Path outside workspace (read): /tmp/test")
+        precondition(other.localizedDescription == "Path outside workspace (read): /tmp/test（code 40409）")
+
         let mediaSource = AttachmentSource(.object(["kind": .string("session_media"), "fileId": .string("f_photo")]))
         precondition(mediaSource == .sessionMedia("f_photo"))
         let inline = try await realClient.attachmentData(.url(URL(string: "data:image/png;base64,AQID")!), sessionID: "test")
@@ -285,6 +324,6 @@ struct AttachmentChecks {
             _ = try await realClient.attachmentData(.url(URL(string: "file:///tmp/not-an-image")!), sessionID: "test")
             preconditionFailure("Local file URL must not be loaded from a transcript")
         } catch {}
-        print("PASS: image uploads, bounded JSON, retry preservation, image-only receipt reconciliation, repeated text, echo-before-response, preview sources, unique attachment identities and upstream file mentions")
+        print("PASS: image uploads, bounded JSON, retry preservation, image-only receipt reconciliation, repeated text, echo-before-response, preview sources, unique attachment identities, upstream file mentions and Markdown file links")
     }
 }

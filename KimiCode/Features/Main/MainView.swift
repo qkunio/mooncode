@@ -38,7 +38,7 @@ struct MainView: View {
                     .allowsHitTesting(isSidebarOpen)
                     .zIndex(1)
 
-                SidebarView(close: { setSidebar(open: false) })
+                SidebarView(close: { setSidebar(open: false) }, isVisible: isSidebarOpen)
                     .frame(width: sidebarWidth)
                     .offset(x: (progress - 1) * (sidebarWidth + leadingInset))
                     .zIndex(2)
@@ -129,6 +129,14 @@ private struct SidebarPanGesture: UIGestureRecognizerRepresentable {
         init(isOpen: Bool) { self.isOpen = isOpen }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            var current = touch.view
+            while let view = current {
+                if view.accessibilityIdentifier == DeviceStrip.scrollAccessibilityIdentifier {
+                    touchedView = nil
+                    return false
+                }
+                current = view.superview
+            }
             touchedView = touch.view
             return true
         }

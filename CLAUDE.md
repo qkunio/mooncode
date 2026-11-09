@@ -43,13 +43,13 @@ diff/文件卡片、看子 agent 与 task 面板、终端流）。
 主页                                   侧栏（从左推入，主页被推到右边露出一截）
 ┌──────────────────────────┐           ┌──────────────────────┬──┐
 │ (≡)          (◔)(📁)      │           │ MoonCode             │  │
-│                          │           │ 设备 (MAC ▾)          │  │ ← 切设备
-│        对话正文            │           │ 📁 Folder1        (+) │  │ ← + 在该文件夹新建会话
-│                          │           │   ○ Session1          │  │
-│ ┌──────────────────────┐ │           │   ○ Session2          │  │
-│ │ 让 Kimi 做点什么…      │ │           │ 📁 Folder2        (+) │  │
-│ │ (+) (⚡︎) K3·Low      (↑)│ │           │ ──────────────────── │  │
-│ └──────────────────────┘ │           │ (头像) 昵称      [⎋] │  │ ← 退出登录，二次确认
+│                          │           │ ● Mac  ● Other         │  │ ← 可开关的横排设备
+│        对话正文            │           │ ＋ 添加文件夹          │  │
+│                          │           │ 📁 Folder1        (+) │  │ ← + 在该文件夹新建会话
+│ ┌──────────────────────┐ │           │   ○ Session1          │  │
+│ │ 让 Kimi 做点什么…      │ │           │   ○ Session2          │  │
+│ │ (+) (⚡︎) K3·Low      (↑)│ │           │ 📁 Folder2        (+) │  │
+│ └──────────────────────┘ │           │ (头像) 昵称 >          │  │ ← 个人面板
 └──────────────────────────┘           └──────────────────────┴──┘
 ```
 
@@ -60,18 +60,19 @@ diff/文件卡片、看子 agent 与 task 面板、终端流）。
 
 | 元素 | 接口 | 备注 |
 |---|---|---|
-| 设备下拉 | relay `GET /v1/remote/devices` | 离线的列出但禁用 |
+| 设备列表 | relay `GET /v1/remote/devices` | 顺序沿用现有在线优先、名称排序。个人面板的「在会话栏中显示设备列表」开关存 `kimi.showsDevicesInSidebar`，默认开启（保留用户手动关闭的选择）。开启时在 Moon Code 下横排，在线绿点 / 离线红点，上下留白各 14pt，右侧 56pt 渐隐，滚动区域右缘与添加文件夹 + 对齐；进入侧栏立即静默刷新，之后每 3 秒一次，收起侧栏或关闭开关停止，不提供拽放 / 刷新入口。关闭时个人面板显示全部设备和刷新按钮，勾选当前设备。离线均列出但禁用 |
 | 添加项目（设备下方） | `GET /fs:home` → `GET /fs:browse?path=` 逐级浏览 → `POST /workspaces {root}`（按 root 幂等） | 照网页端 AddWorkspaceDialog：上一级 / 面包屑 / 子文件夹列表 / 当前目录下模糊搜索（最多 6 层、600 个目录、150 条，同批 6 并发）/「打开此文件夹」；加完在新项目开新对话并收起侧栏 |
 | 文件夹 | `GET /workspaces` → `{items:[{id,root,name,last_opened_at,session_count}]}` | 按 `last_opened_at` 倒序 |
 | 文件夹下的会话 | `GET /sessions` 按 `workspace_id` 分组；点文件夹名展开/收起（无箭头） | 已归档的、挂不上任何文件夹的都不显示 |
 | 文件夹旁 + | 草稿；第一条消息时 `POST /sessions {metadata:{cwd:root}, workspace_id, agent_config}` | 与网页端 `createSession` 同形 |
-| 头像 + 昵称 | `GET /oauth/userinfo` → `userInfo.{nickname, avatar}` | 响应里还有手机号等，**只解码这两个字段**。无昵称显示「Kimi 用户」 |
-| 退出登录 | 本地清凭证 | alert「是否退出登录？」→ 取消 / 退出 |
+| 头像 + 昵称 | `GET /oauth/userinfo` → `userInfo.{nickname, avatar}` | 响应里还有手机号等，**只解码这两个字段**。无昵称显示「Kimi 用户」。侧栏底部显示「头像 昵称 ›」，打开全屏 `AccountSheet`；顶部是大头像和昵称，底部退出登录（体验模式为退出体验） |
+| 个人面板默认配置 | `GET /config` 的 `default_model` / `thinking`；选择后 `POST /config` 只带改动的字段 | 两行「默认模型」「默认强度」，无「新会话」标题或副标题，右侧值用 `.primary`。模型复用 `DefaultModelList` 按来源分组；强度用 `DefaultThinkingList`，off 排最前，选 on 时落模型默认强度。只改新会话默认值，不改当前会话；默认权限及供应商管理仍在模型配置里 |
+| 退出登录 | 本地清凭证 | 个人面板最底部，alert「是否退出登录？」→ 取消 / 退出 |
 | 权限图标 | 2.5+ WS 全量 `agent.permission_mode`；旧版 `GET /sessions/{id}/status` 的 `permission` | composer 上只显示图标（hand.raised / checkmark.shield / bolt.shield），文字只在菜单里。**标签映射别弄反**：`manual`=始终询问、`yolo`=必要时询问、`auto`=完全自动 |
 | 右上角 📁（上下文环右边） | 目录：`POST /sessions/{id}/fs:list {path, limit:1000}`；文本预览：`POST /sessions/{id}/fs:read {path, offset:0, length:1MiB, encoding:auto}`；整个文件：`fs:read` 按 3 MiB 分块读 `encoding:base64` | 上拉栏（默认半屏 medium，可拉到 large），点文件夹逐级推入。点文件直接加载预览，右上角 ⋯ 菜单：「下载」走系统分享面板；「保存到相册」（仅图片，`PHPhotoLibrary` addOnly 权限）；「添加到会话」收起文件栏、在 composer 附件条加一张文件卡（`Attachment.mention`），发送时照网页端 `rv` 写成 `[名字](相对路径)` 拼在正文开头，不上传。正文里的这种提及由 `ConversationBuilder.splitMentions` 拆成气泡上的附件标签。输入框里的文件卡、气泡上的文件标签点一下弹出 `FilePreviewSheet`（经环境值 `openFilePreview`，读文件用的会话同 📁），从这里打开时菜单里没有「添加到会话」（含「保存到"文件"」）。Markdown 默认复用 `MarkdownText` 渲染，HTML 默认用静态 `WKWebView` 渲染（禁 JavaScript 与外部网络资源），右上角可切换源码；源码用只读 UITextView 等宽显示、可自由选择，截断时提示总大小；二进制、图片/PDF/音视频拉整个文件交给 Quick Look。**不用 `GET fs/{path}:download`**：kap-server 2.0.1 把文件名原样写进 `content-disposition`，中文名直接 500；`fs:read` 又整体拒绝 >10 MiB 的文件（41302，与 offset 无关），所以超过 10 MB 直接显示「因 Kimi 官方限制，无法预览或下载 10MB 以上文件」，下载图标置灰。临时文件放 `tmp/MoonCodePreview/`，离开页面删、启动时清。草稿借同文件夹里最近的会话（workDir 相同）；文件夹里一个会话都没有时提示发第一条消息后再看（`fs:browse` 只回文件夹，拿不到文件） |
 | 右上角上下文环（📁 左边） | 环：2.5+ WS 全量 `usage`（`context_tokens / max_context_tokens`）；旧版 `/status` 的 `context_usage` 和 transcript `meta.agent.contextUsage`（输入框上不放上下文圈）。点开「用量」上拉栏（左上角 ✕，medium/large），每项一张卡片、卡片上方灰色小标题：「此对话上下文」卡片 = 已使用 x% + 横条 + `context_tokens / max_context_tokens`；「5 小时 / 每周 / 每月使用限额」卡片 = `GET /oauth/usage` → `quota.usages.{limit5h,limit7d,monthTotal}` 的**已使用** `usedRatio` + 横条 +「21小时59分钟后重置」（`resetAt`） | 按 5 小时 → 每周 → 每月 顺序显示存在的项。打开时刷新用量 |
 | K3·Low | 2.5+ WS 全量 `agent.model` + `agent.thinking`；旧版 `/status` 的 `model` + `thinking_level`。名字查 `GET /models` 的 `display_name`，可选强度查 `support_efforts` | `thinking` 取值是强度名或 `on`/`off`；只有一个选项（如恒开无强度）时只显示名字，`off` 显示「Off」 |
-| 模型菜单 | `GET /models` 全部列出，按 provider 分组（`managed:kimi-code` 组名「Kimi 订阅」排最前，其他照原 id 显示，同网页端） | 面板左上 ✕、右上 ⚙︎，点选即生效（无「完成」）；面板只放模型：provider 分组名（Kimi 订阅 / deepseek…）就是一级标题，同用量面板卡片上方的灰色小标题，不再套「模型来源」。composer 上「模型名 High」一个按钮，开 `ModelPanel`（`ThinkingSlider.swift`）：首页两张同样式卡片（标题 + 灰色副标题 + ›）：「当前模型」（模型名 / 来源）、「思考强度」（当前档位 / 全部档位）。点卡片在面板内推入子页（模型列表 / 思考强度），左上角返回；面板高度跟当前页走（各页量高度报给 detent，只有当前页报）。思考强度子页是大号分档滑杆，左低右高、「关闭」最左，拖动吸附、每档轻震、松手才写入；不用弹出菜单（iOS 26 菜单会从整行胶囊变形出来）。拉到最高档轨道变紫、白色小气泡不断向左飘，刚到顶档位名弹一下 + 迸一圈星星 + 重震（彩蛋，减弱动态效果时不动）。拖动位置用 `@GestureState` + `highPriorityGesture`，否则上拉栏抢走手势时滑块会卡在两档中间。⚙︎ 打开「模型配置」（`ProviderSettingsView.swift`）：最上面「默认配置」卡片（摘要「模型 · 权限 · 思考」）→ 默认模型 / 默认权限 / 默认思考三项（照网页端「Agent 默认值」前三项；读 `GET /config` 的 `default_model`、`default_permission_mode`（空=manual）、`thinking{enabled,effort?}`，每改一项 `POST /config` 只带该字段，思考按网页端 `q8`/`bpe` 写）；下面是模型供应商（照网页端「供应商管理」）：`GET /providers` 列表（状态点、左滑刷新 `POST /providers/{id}:refresh` / 删除 `DELETE`，204）；编辑表单模型表来自 `GET /config` 的 `models` 段（驼峰键，只解码这一段），保存 `PUT /providers/{id}`（改名带 `new_id`，key 三态：不带=保留、`""`=清空），手动添加 `POST /providers`（名称 / key / Base URL 必填）；从目录添加 `GET /catalog/providers` → `POST /providers:import_catalog`。Kimi 订阅（`managed:kimi-code`）OAuth 托管只读。注册表导入没做。改完 `AppModel.reloadModels()`。思考选项照网页端 `ov`/`sv`/`z1`：`always_thinking`+强度 → 选强度；只有 `thinking` → 开/关；都没有 → 固定 `off`（见 `ModelInfo.thinkingOptions`） |
+| 模型菜单 | `GET /models` 全部列出，按 provider 分组（`managed:kimi-code` 组名「Kimi 订阅」排最前，其他照原 id 显示，同网页端） | 面板左上 ✕、右上 ⚙︎，点选即生效（无「完成」）；面板只放模型：provider 分组名（Kimi 订阅 / deepseek…）就是一级标题，同用量面板卡片上方的灰色小标题，不再套「模型来源」。composer 上「模型名 High」一个按钮，开 `ModelPanel`（`ThinkingSlider.swift`）：首页两张同样式卡片（标题 + 灰色副标题 + ›）：「当前模型」（模型名 / 来源）、「思考强度」（当前档位 / 全部档位）。点卡片在面板内推入子页（模型列表 / 思考强度），左上角返回；面板高度跟当前页走（各页量高度报给 detent，只有当前页报）。思考强度子页是大号分档滑杆，左低右高、「关闭」最左，拖动吸附、每档轻震、松手才写入；不用弹出菜单（iOS 26 菜单会从整行胶囊变形出来）。拉到最高档轨道变紫、白色小气泡不断向左飘，刚到顶档位名弹一下 + 迸一圈星星 + 重震（彩蛋，减弱动态效果时不动）。拖动位置用 `@GestureState` + `highPriorityGesture`，否则上拉栏抢走手势时滑块会卡在两档中间。⚙︎ 打开「模型配置」（`ProviderSettingsView.swift`）：最上面「默认配置」→ 默认权限 / 默认思考（默认模型在侧栏个人面板；读 `GET /config` 的 `default_model`、`default_permission_mode`（空=manual）、`thinking{enabled,effort?}`，每改一项 `POST /config` 只带该字段，思考按网页端 `q8`/`bpe` 写）；下面是模型供应商（照网页端「供应商管理」）：`GET /providers` 列表（状态点、左滑刷新 `POST /providers/{id}:refresh` / 删除 `DELETE`，204）；编辑表单模型表来自 `GET /config` 的 `models` 段（驼峰键，只解码这一段），保存 `PUT /providers/{id}`（改名带 `new_id`，key 三态：不带=保留、`""`=清空），手动添加 `POST /providers`（名称 / key / Base URL 必填）；从目录添加 `GET /catalog/providers` → `POST /providers:import_catalog`。Kimi 订阅（`managed:kimi-code`）OAuth 托管只读。注册表导入没做。改完 `AppModel.reloadModels()`。思考选项照网页端 `ov`/`sv`/`z1`：`always_thinking`+强度 → 选强度；只有 `thinking` → 开/关；都没有 → 固定 `off`（见 `ModelInfo.thinkingOptions`） |
 | 改权限 / 模型 / 强度 | `POST /sessions/{id}/profile {agent_config:{permission_mode?, model?, thinking?}}` | 只带改动的字段 |
 | 新对话默认值 | 上次的选择（UserDefaults）；第一次：`auto` + `GET /config` 的 `default_model` + 该模型默认思考（`defaultThinking`） | 模型已不在这台电脑上就退到列表第一个。建会话时显式带全，界面显示 == 真实值。电脑上模型凭证有问题时服务端回 40111/40112/40113（HTTP 200 信封），App 提示去电脑上配置，**不登出** |
 | + 菜单：图片 | 先 multipart `POST /files` 上传 JPEG，再发 `{type:"image", source:{kind:"file", file_id}, name}` | 长边缩到 1600px；图片仍是 image part，不内联 base64，避免大消息 JSON；单附件上限 9 MB；模型无 `image_in` 时禁用 |
@@ -401,6 +402,7 @@ SIMCTL_CHILD_KIMI_DEBUG_REFRESH_TOKEN="$(python3 -c "import json;print(json.load
 - **正文原地自由选择**：iOS 上 `Text` 的 `.textSelection` 长按只能整段拷贝，所以助手 Markdown、用户气泡、思考段落改用不可编辑的
   UITextView 排版（`Features/Session/SelectableText.swift`），长按选词、拖手柄任意调整。连续的段落 / 标题 / 列表排在同一个视图里可跨段选；
   代码块、表格、引用、分隔线是隔断。长按选词全交给 UITextView 自己，不加自定义手势；只在外面让路：对话页点空白收起键盘时跳过选中的字和手柄附近，选字时横滑不开侧栏。
+  用户气泡点按展开操作行时，等系统更新选区后再判断，不能另叠 `LongPressGesture`，否则按住气泡无法上下滚动。正文里的本地文件链接（相对路径、绝对路径 / `file://`、Windows 路径）交给 `openFilePreview`，与文件标签共用 `FilePreviewSheet`；网页 / 锚点等非文件链接保持系统默认行为。
   取消选择时别立刻改选区（系统会自己藏高亮），否则正在缩回的菜单会跟着滑走；旧选区等动画完再清。
   表格长按弹系统菜单「拷贝」（`.contextMenu`，制表符分列），代码块用自带复制按钮。
   UIKit 读不到 SwiftUI 环境的 `.font` / `.foregroundStyle`，`MarkdownText` 要换字号颜色得传 `tone`。工具输出面板仍是 `.textSelection` 整段拷贝。
@@ -436,6 +438,8 @@ SIMCTL_CHILD_KIMI_DEBUG_REFRESH_TOKEN="$(python3 -c "import json;print(json.load
 - **乐观发送。** 用户消息先本地显示，失败保留原始附件并给「重试 / 丢弃」，重试不消耗输入框里的新草稿。
   成功后按提交返回的 `prompt_id` / `user_message_id` 与 turn 的 `triggerPromptId`、transcript prompt 实体核对，处理纯图片、重复正文及回显先到。
 - **聊天图片。** 图片逐个上传后以 image part 引用；正文按 `attachmentId` 区分，同名图片不合并。
+  服务端给模型看的 `Attached file … — open it with the Read tool` 内部说明不当用户正文显示；`ConversationBuilder.stripInjected`
+  按实际附件数逐行匹配清理，保留用户自己写的正文及相似文字。文件路径 / 符号链接超出工作区时，服务端错误码 `41304` 显示中文，其它错误保留原始信息。
   气泡显示 74pt 缩略图和序号，多图可全屏左右切换、下拉关闭；乐观消息被替换时预览不关闭。
   图片来源经 `/files/{id}` 或 `/sessions/{id}/media/{fileId}` 读取，原图字节用 32 MiB 成本缓存，下载最多累计 9 MiB，超限立即取消。
   `bash scripts/check-attachments.sh` 覆盖多图请求大小、混合附件、上传 / 发消息失败重试、纯图片与重复正文回显。

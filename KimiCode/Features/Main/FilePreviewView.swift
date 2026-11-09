@@ -386,6 +386,7 @@ struct FilePreviewSheet: View {
                     }
                 }
         }
+        .presentationBackground(Color(.systemGroupedBackground))
     }
 }
 
