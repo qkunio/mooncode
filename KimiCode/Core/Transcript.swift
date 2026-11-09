@@ -199,6 +199,7 @@ struct TranscriptAttachment: Decodable, Sendable, Equatable {
 
 struct TranscriptPrompt: Decodable, Sendable, Equatable {
     let promptId: String
+    var userMessageId: String?
     var status: String?
     var content: JSONValue?
     var createdAt: String?

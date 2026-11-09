@@ -32,9 +32,11 @@ struct UserEntry: Sendable {
     var undoCount: Int?
 }
 
-struct AttachmentRef: Sendable, Hashable {
+struct AttachmentRef: Identifiable, Sendable, Hashable {
+    let id: String
     let name: String
     let isImage: Bool
+    let source: AttachmentSource?
     /// 正文里拆出来的文件提及才有：会话目录里的相对路径（文件夹以 `/` 结尾），点它打开预览。
     var mentionPath: String? = nil
 
@@ -487,8 +489,10 @@ enum ConversationBuilder {
     static func attachmentRef(_ attachment: TranscriptAttachment) -> AttachmentRef {
         let type = attachment.mediaType ?? ""
         return AttachmentRef(
+            id: attachment.attachmentId,
             name: attachment.name ?? attachment.attachmentId,
-            isImage: type.hasPrefix("image/") || type == "image/*"
+            isImage: type.hasPrefix("image/") || type == "image/*",
+            source: AttachmentSource(attachment.source)
         )
     }
 
@@ -512,7 +516,8 @@ enum ConversationBuilder {
                 .replacingOccurrences(of: "%3E", with: ">")
                 .replacingOccurrences(of: "%25", with: "%")
             mentions.append(AttachmentRef(
-                name: name, isImage: false, mentionPath: target.removingPercentEncoding ?? target
+                id: "mention:\(mentions.count):\(target)", name: name, isImage: false,
+                source: nil, mentionPath: target.removingPercentEncoding ?? target
             ))
             return ""
         }

@@ -1,6 +1,8 @@
 import Foundation
 import Observation
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /// composer 上那一排的选择：权限模式 / 模型 / 思考。新会话会继承上一次的选择。
 struct ComposerConfig: Codable, Equatable, Sendable {
@@ -72,7 +74,11 @@ final class ChatModel {
     struct OptimisticPrompt: Identifiable, Sendable {
         let id = UUID()
         let text: String
-        let attachmentCount: Int
+        /// 发送失败后重试需要原始附件；正文确认收到后随乐观消息一起释放。
+        let attachments: [Attachment]
+        var attachmentCount: Int { attachments.count }
+        var promptID: String?
+        var userMessageID: String?
         var failed = false
     }
 
@@ -108,7 +114,9 @@ final class ChatModel {
     private var foregroundTask: Task<Void, Never>?
     private var backgroundTask: Task<Void, Never>?
     /// 进后台时向系统要的那段执行时间（约 30 秒）：短暂切出去时连接不断，正文照常往下收。
+    #if canImport(UIKit)
     private var backgroundTimeID: UIBackgroundTaskIdentifier = .invalid
+    #endif
     private var backgroundedAt: ContinuousClock.Instant?
     /// 后台时间用完了（系统马上要挂起 App），连接多半会被掐掉。
     private var backgroundTimeExpired = false
@@ -122,6 +130,21 @@ final class ChatModel {
     private var emptyResetRetries = 0
     private let interactionRefresh = RefreshScheduler()
     private let transcriptReload = RefreshScheduler()
+    @ObservationIgnored private let attachmentCache: NSCache<NSString, NSData> = {
+        let cache = NSCache<NSString, NSData>()
+        cache.totalCostLimit = 32 * 1024 * 1024
+        return cache
+    }()
+
+    func attachmentData(_ attachment: AttachmentRef) async throws -> Data {
+        guard let source = attachment.source, let sessionID else {
+            throw KapError.api(code: -1, message: "这张图片没有可读取的预览。")
+        }
+        if let data = attachmentCache.object(forKey: source.cacheKey as NSString) { return data as Data }
+        let data = try await client.attachmentData(source, sessionID: sessionID)
+        attachmentCache.setObject(data as NSData, forKey: source.cacheKey as NSString, cost: data.count)
+        return data
+    }
 
     var isDraft: Bool { session == nil }
     var sessionID: String? { session?.id }
@@ -235,6 +258,7 @@ final class ChatModel {
                 await self?.handle(signal)
             }
         }
+        #if canImport(UIKit)
         // 进后台：先要一段执行时间，期间连接不断。
         backgroundTask = Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: UIApplication.didEnterBackgroundNotification) {
@@ -248,12 +272,14 @@ final class ChatModel {
                 await self?.returnToForeground()
             }
         }
+        #endif
     }
 
     private func beginBackgroundTime() {
         endBackgroundTime()
         backgroundedAt = .now
         backgroundTimeExpired = false
+        #if canImport(UIKit)
         backgroundTimeID = UIApplication.shared.beginBackgroundTask(withName: "kimi.stream") { [weak self] in
             // 系统在时间到之前回调这里，必须马上把这段时间还回去，否则 App 会被杀掉。
             MainActor.assumeIsolated {
@@ -261,12 +287,15 @@ final class ChatModel {
                 self?.endBackgroundTime()
             }
         }
+        #endif
     }
 
     private func endBackgroundTime() {
+        #if canImport(UIKit)
         guard backgroundTimeID != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundTimeID)
         backgroundTimeID = .invalid
+        #endif
     }
 
     private func returnToForeground() async {
@@ -450,14 +479,14 @@ final class ChatModel {
         entries = ConversationBuilder.build(transcript, timing: thinkingTiming)
         contentVersion &+= 1
         applyAgentMeta()
-        // 已经出现在正文里的 prompt 就不用再乐观显示了。
-        let known = Set(entries.compactMap { entry -> String? in
-            if case let .user(user) = entry.kind { return user.text }
-            return nil
+        // 按服务端收据确认，不能用正文相同来判断；纯图片和重复文字也必须能对应上。
+        let turnIDs = Set(transcript.turns.compactMap(\.triggerPromptId))
+        let promptIDs = Set(transcript.prompts.values.flatMap { prompt in
+            [prompt.promptId, prompt.userMessageId].compactMap { $0 }
         })
-        // 正文里的文件提及被拆成了附件，比对前乐观那条也要同样拆掉。
-        optimisticPrompts.removeAll {
-            !$0.failed && known.contains(ConversationBuilder.splitMentions($0.text).text)
+        let known = turnIDs.union(promptIDs)
+        optimisticPrompts.removeAll { prompt in
+            !prompt.failed && [prompt.promptID, prompt.userMessageID].compactMap { $0 }.contains(where: known.contains)
         }
         // 这一轮已经跑起来了，或者跑得太快、回复已经落进正文（体验模式轮询时会这样）：空档结束。
         if awaitingTurn, transcript.isTurnActive || (optimisticPrompts.isEmpty && entries.last?.isAssistant == true) {
@@ -550,9 +579,13 @@ final class ChatModel {
             pending.removeAll { if case .mention = $0 { true } else { false } }
         }
 
-        let optimistic = OptimisticPrompt(text: trimmed, attachmentCount: pending.count)
+        let optimistic = OptimisticPrompt(text: trimmed, attachments: pending)
         optimisticPrompts.append(optimistic)
         attachments = []
+        await submit(optimistic)
+    }
+
+    private func submit(_ optimistic: OptimisticPrompt) async {
         isSending = true
         defer { isSending = false }
 
@@ -569,24 +602,36 @@ final class ChatModel {
                 await start()
             }
             guard let sessionID else { return }
-            var images: [Data] = []
+            var images: [UploadedFile] = []
             var files: [UploadedFile] = []
-            for attachment in pending {
+            for attachment in optimistic.attachments {
                 switch attachment {
-                case let .image(_, jpeg, _):
-                    images.append(jpeg)
+                case let .image(id, jpeg, _):
+                    let file = try await client.uploadFile(
+                        jpeg, name: "image-\(id.uuidString).jpg", mediaType: "image/jpeg"
+                    )
+                    images.append(file)
+                    for source in [AttachmentSource.file(file.id), .sessionMedia(file.id)] {
+                        attachmentCache.setObject(jpeg as NSData, forKey: source.cacheKey as NSString, cost: jpeg.count)
+                    }
                 case let .file(_, name, mediaType, data):
                     files.append(try await client.uploadFile(data, name: name, mediaType: mediaType))
                 case .mention:
                     break
                 }
             }
-            _ = try await client.sendPrompt(
-                .make(text: trimmed, images: images, files: files, config: config.patch),
+            let accepted = try await client.sendPrompt(
+                .make(text: optimistic.text, images: images, files: files, config: config.patch),
                 to: sessionID
             )
+            if let index = optimisticPrompts.firstIndex(where: { $0.id == optimistic.id }) {
+                optimisticPrompts[index].promptID = accepted.promptID
+                optimisticPrompts[index].userMessageID = accepted.userMessageID
+            }
             holdsLocalConfig = false
             setAwaitingTurn(true)
+            // 回显可能先于 HTTP 响应到达；拿到服务端 id 后立即再核对一次。
+            rebuild()
             scheduleOfflineReload()
         } catch {
             errorMessage = error.localizedDescription
@@ -602,8 +647,10 @@ final class ChatModel {
     }
 
     func retry(_ prompt: OptimisticPrompt) async {
-        optimisticPrompts.removeAll { $0.id == prompt.id }
-        await send(prompt.text)
+        guard !isWorking,
+              let index = optimisticPrompts.firstIndex(where: { $0.id == prompt.id && $0.failed }) else { return }
+        optimisticPrompts[index].failed = false
+        await submit(optimisticPrompts[index])
     }
 
     func discard(_ prompt: OptimisticPrompt) {
