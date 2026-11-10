@@ -1,6 +1,6 @@
 import Foundation
 
-struct TokenUsageTimeRange: Hashable, Sendable {
+struct TokenUsageTimeRange: Codable, Hashable, Sendable {
     var start: Date
     var end: Date
 
@@ -9,7 +9,7 @@ struct TokenUsageTimeRange: Hashable, Sendable {
     }
 }
 
-struct TokenUsageTotals: Sendable, Hashable {
+struct TokenUsageTotals: Codable, Sendable, Hashable {
     private(set) var input = 0
     private(set) var output = 0
     private(set) var cacheRead = 0
@@ -80,6 +80,12 @@ struct DeviceUsageLoader: Sendable {
     static let unknownModel = "unknown"
 
     let client: any KapServicing
+    let cacheKey: String?
+
+    init(client: any KapServicing, cacheKey: String? = nil) {
+        self.client = client
+        self.cacheKey = cacheKey
+    }
 
     struct SessionUsage: Sendable {
         var totals = TokenUsageTotals()
@@ -89,6 +95,12 @@ struct DeviceUsageLoader: Sendable {
         var subagentCount = 0
 
         var hasUsage: Bool { turnCount > 0 || subagentCount > 0 }
+    }
+
+    private struct SessionScan: Sendable {
+        let sessionID: String
+        let usages: [SessionUsage]
+        let cache: DeviceUsageSessionCache
     }
 
     private struct MutableReport: Sendable {
@@ -117,28 +129,243 @@ struct DeviceUsageLoader: Sendable {
         in range: TokenUsageTimeRange,
         progress: (@Sendable (DeviceUsageProgress) async -> Void)? = nil
     ) async throws -> DeviceTokenUsageReport {
-        guard range.start < range.end else {
-            throw KapError.api(code: -1, message: "开始时间需要早于结束时间。")
+        try await tokenUsage(in: [range], progress: progress)[0]
+    }
+
+    func tokenUsage(
+        in ranges: [TokenUsageTimeRange],
+        progress: (@Sendable (DeviceUsageProgress) async -> Void)? = nil
+    ) async throws -> [DeviceTokenUsageReport] {
+        guard !ranges.isEmpty, ranges.allSatisfy({ $0.start < $0.end }) else {
+            throw KapError.api(code: -1, message: "统计时间段无效。")
         }
-        let sessions = try await allSessions()
+        guard let earliestStart = ranges.map(\.start).min(), let latestEnd = ranges.map(\.end).max() else {
+            throw KapError.api(code: -1, message: "统计时间段无效。")
+        }
+        let coverage = TokenUsageTimeRange(start: earliestStart, end: latestEnd)
+        let sessions = try await allSessions(in: coverage)
         await progress?(DeviceUsageProgress(completedSessions: 0, totalSessions: sessions.count))
-        var report = MutableReport()
+        var cache = cacheKey.map { DeviceUsageCacheStore.load(deviceID: $0) } ?? [:]
+        var reports = Array(repeating: MutableReport(), count: ranges.count)
         var index = 0
         while index < sessions.count {
             try Task.checkCancellation()
-            let end = min(index + 4, sessions.count)
-            let batch = try await withThrowingTaskGroup(of: SessionUsage.self) { group in
+            let end = min(index + 2, sessions.count)
+            let cacheSnapshot = cache
+            let batch = try await withThrowingTaskGroup(of: SessionScan.self) { group in
                 for session in sessions[index ..< end] {
-                    group.addTask { try await sessionUsage(session.id, in: range) }
+                    group.addTask {
+                        try await sessionUsage(
+                            session,
+                            ranges: ranges,
+                            coverage: coverage,
+                            cached: cacheSnapshot[session.id]
+                        )
+                    }
                 }
-                var values: [SessionUsage] = []
+                var values: [SessionScan] = []
                 for try await value in group { values.append(value) }
                 return values
             }
-            for value in batch { report.merge(value) }
+            for value in batch {
+                cache[value.sessionID] = value.cache
+                for reportIndex in reports.indices {
+                    reports[reportIndex].merge(value.usages[reportIndex])
+                }
+            }
+            if let cacheKey { DeviceUsageCacheStore.save(deviceID: cacheKey, sessions: cache) }
             index = end
             await progress?(DeviceUsageProgress(completedSessions: index, totalSessions: sessions.count))
         }
+        return reports.map { makeReport($0, scannedSessionCount: sessions.count) }
+    }
+
+    private func allSessions(in coverage: TokenUsageTimeRange) async throws -> [SessionSummary] {
+        var result: [SessionSummary] = []
+        var identifiers: Set<String> = []
+        var cursors: Set<String> = []
+        var beforeID: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await client.sessionPage(pageSize: 100, beforeID: beforeID, includeArchive: true)
+            for session in page.items where identifiers.insert(session.id).inserted {
+                let createdInRange = session.createdAt?.date.map { $0 < coverage.end } ?? true
+                let updatedInRange = session.updatedAt?.date.map { $0 >= coverage.start } ?? true
+                if createdInRange && updatedInRange { result.append(session) }
+            }
+            guard page.hasMore == true, let next = page.items.last?.id, !next.isEmpty else { return result }
+            guard next != beforeID, cursors.insert(next).inserted else {
+                throw KapError.api(code: -1, message: "会话分页游标重复，无法完成 Token 统计。")
+            }
+            beforeID = next
+        }
+    }
+
+    private func sessionUsage(
+        _ session: SessionSummary,
+        ranges: [TokenUsageTimeRange],
+        coverage: TokenUsageTimeRange,
+        cached: DeviceUsageSessionCache?
+    ) async throws -> SessionScan {
+        let sessionModel = session.agentConfig?.model.flatMap { $0.isEmpty ? nil : $0 }
+        if let cached,
+           let updatedAt = session.updatedAt?.date,
+           cached.sessionUpdatedAt == updatedAt,
+           cached.coverage.start <= coverage.start {
+            let records = cached.records.map { record in
+                guard record.kind != .subagent, record.model == nil, let sessionModel else { return record }
+                return TokenUsageRecord(
+                    id: record.id,
+                    kind: record.kind,
+                    turnID: record.turnID,
+                    date: record.date,
+                    model: sessionModel,
+                    totals: record.totals
+                )
+            }
+            let entry = DeviceUsageSessionCache(
+                sessionUpdatedAt: cached.sessionUpdatedAt,
+                coverage: cached.coverage,
+                records: records
+            )
+            return SessionScan(
+                sessionID: session.id,
+                usages: usages(for: records, ranges: ranges),
+                cache: entry
+            )
+        }
+        let records = try await downloadRecords(session, coverage: coverage, fallbackModel: sessionModel)
+        let entry = DeviceUsageSessionCache(
+            sessionUpdatedAt: session.updatedAt?.date,
+            coverage: coverage,
+            records: records
+        )
+        return SessionScan(sessionID: session.id, usages: usages(for: records, ranges: ranges), cache: entry)
+    }
+
+    private func downloadRecords(
+        _ session: SessionSummary,
+        coverage: TokenUsageTimeRange,
+        fallbackModel: String?
+    ) async throws -> [TokenUsageRecord] {
+        var records: [String: TokenUsageRecord] = [:]
+        var cursors: Set<String> = []
+        var beforeTurn: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await client.transcript(session.id, pageSize: 30, beforeTurn: beforeTurn)
+            let turns = page.items.compactMap { item -> TranscriptTurn? in
+                guard case let .turn(turn) = item else { return nil }
+                return turn
+            }
+            let pageModel = Self.singleModel(in: page.meta) ?? fallbackModel
+            for turn in turns {
+                for record in Self.records(for: turn, model: pageModel) where coverage.contains(record.date) {
+                    records[record.id] = record
+                }
+            }
+            for task in page.tasks where task.kind == "subagent" {
+                guard let record = Self.record(for: task), coverage.contains(record.date) else { continue }
+                records[record.id] = record
+            }
+            let reachedOlderTurns = !turns.isEmpty && turns.allSatisfy { turn in
+                guard let date = Self.date(turn.endedAt ?? turn.startedAt) else { return false }
+                return date < coverage.start
+            }
+            guard page.hasMore, !reachedOlderTurns, let next = turns.first?.turnId, !next.isEmpty else {
+                return records.values.sorted { $0.date < $1.date }
+            }
+            guard next != beforeTurn, cursors.insert(next).inserted else {
+                throw KapError.api(code: -1, message: "对话分页游标重复，无法完成 Token 统计。")
+            }
+            beforeTurn = next
+        }
+    }
+
+    private func usages(for records: [TokenUsageRecord], ranges: [TokenUsageTimeRange]) -> [SessionUsage] {
+        ranges.map { range in
+            var result = SessionUsage()
+            var turnIDs: Set<String> = []
+            var taskIDs: Set<String> = []
+            for record in records where range.contains(record.date) {
+                result.totals.merge(record.totals)
+                result.days[Calendar.current.startOfDay(for: record.date), default: TokenUsageTotals()].merge(record.totals)
+                result.models[record.model ?? Self.unknownModel, default: TokenUsageTotals()].merge(record.totals)
+                switch record.kind {
+                case .mainStep, .mainTurn:
+                    if let turnID = record.turnID { turnIDs.insert(turnID) }
+                case .subagent:
+                    taskIDs.insert(record.id)
+                }
+            }
+            result.turnCount = turnIDs.count
+            result.subagentCount = taskIDs.count
+            return result
+        }
+    }
+
+    func accumulate(
+        _ turn: TranscriptTurn,
+        into result: inout SessionUsage,
+        range: TokenUsageTimeRange,
+        model: String? = nil
+    ) {
+        result = usages(for: Self.records(for: turn, model: model), ranges: [range])[0]
+    }
+
+    private static func records(for turn: TranscriptTurn, model: String?) -> [TokenUsageRecord] {
+        let hasStepUsage = turn.steps.contains { $0.usage != nil }
+        if hasStepUsage {
+            return turn.steps.compactMap { step in
+                guard let usage = step.usage,
+                      let date = date(step.endedAt ?? step.startedAt ?? turn.endedAt ?? turn.startedAt)
+                else { return nil }
+                return TokenUsageRecord(
+                    id: "mainStep:\(step.stepId)",
+                    kind: .mainStep,
+                    turnID: turn.turnId,
+                    date: date,
+                    model: step.model ?? turn.model ?? model,
+                    totals: totals(for: usage)
+                )
+            }
+        }
+        guard let usage = turn.usage, let date = date(turn.endedAt ?? turn.startedAt) else { return [] }
+        return [TokenUsageRecord(
+            id: "mainTurn:\(turn.turnId)",
+            kind: .mainTurn,
+            turnID: turn.turnId,
+            date: date,
+            model: turn.model ?? model,
+            totals: totals(for: usage)
+        )]
+    }
+
+    private static func record(for task: TranscriptTask) -> TokenUsageRecord? {
+        guard let usage = task.usage, let date = date(task.endedAt ?? task.startedAt) else { return nil }
+        return TokenUsageRecord(
+            id: "subagent:\(task.taskId)",
+            kind: .subagent,
+            turnID: nil,
+            date: date,
+            model: task.model,
+            totals: totals(for: usage)
+        )
+    }
+
+    private static func totals(for usage: TranscriptTokenUsage) -> TokenUsageTotals {
+        var result = TokenUsageTotals()
+        result.add(usage)
+        return result
+    }
+
+    private static func totals(for usage: TranscriptTurnUsage) -> TokenUsageTotals {
+        var result = TokenUsageTotals()
+        result.add(usage)
+        return result
+    }
+
+    private func makeReport(_ report: MutableReport, scannedSessionCount: Int) -> DeviceTokenUsageReport {
         let models = report.models.map { ModelTokenUsage(model: $0.key, totals: $0.value) }.sorted {
             if $0.totals.total != $1.totals.total { return $0.totals.total > $1.totals.total }
             if ($0.model == Self.unknownModel) != ($1.model == Self.unknownModel) {
@@ -150,105 +377,11 @@ struct DeviceUsageLoader: Sendable {
             totals: report.totals,
             days: report.days.map { DailyTokenUsage(date: $0.key, totals: $0.value) }.sorted { $0.date > $1.date },
             models: models,
-            scannedSessionCount: sessions.count,
+            scannedSessionCount: scannedSessionCount,
             sessionCount: report.sessionCount,
             turnCount: report.turnCount,
             subagentCount: report.subagentCount
         )
-    }
-
-    private func allSessions() async throws -> [SessionSummary] {
-        var result: [SessionSummary] = []
-        var identifiers: Set<String> = []
-        var cursors: Set<String> = []
-        var beforeID: String?
-        while true {
-            try Task.checkCancellation()
-            let page = try await client.sessionPage(pageSize: 100, beforeID: beforeID, includeArchive: true)
-            for session in page.items where identifiers.insert(session.id).inserted {
-                result.append(session)
-            }
-            guard page.hasMore == true, let next = page.items.last?.id, !next.isEmpty else { return result }
-            guard next != beforeID, cursors.insert(next).inserted else {
-                throw KapError.api(code: -1, message: "会话分页游标重复，无法完成 Token 统计。")
-            }
-            beforeID = next
-        }
-    }
-
-    private func sessionUsage(_ sessionID: String, in range: TokenUsageTimeRange) async throws -> SessionUsage {
-        var result = SessionUsage()
-        var turnIDs: Set<String> = []
-        var taskIDs: Set<String> = []
-        var cursors: Set<String> = []
-        var beforeTurn: String?
-        while true {
-            try Task.checkCancellation()
-            let page = try await client.transcript(sessionID, pageSize: 100, beforeTurn: beforeTurn)
-            let turns = page.items.compactMap { item -> TranscriptTurn? in
-                guard case let .turn(turn) = item else { return nil }
-                return turn
-            }
-            let pageModel = Self.singleModel(in: page.meta)
-            for turn in turns where turnIDs.insert(turn.turnId).inserted {
-                accumulate(turn, into: &result, range: range, model: pageModel)
-            }
-            for task in page.tasks where task.kind == "subagent" && taskIDs.insert(task.taskId).inserted {
-                guard let usage = task.usage,
-                      let date = Self.date(task.endedAt ?? task.startedAt), range.contains(date)
-                else { continue }
-                add(usage, at: date, model: task.model, to: &result)
-                result.subagentCount += 1
-            }
-            let reachedOlderTurns = !turns.isEmpty && turns.allSatisfy { turn in
-                guard let date = Self.date(turn.endedAt ?? turn.startedAt) else { return false }
-                return date < range.start
-            }
-            guard page.hasMore, !reachedOlderTurns, let next = turns.first?.turnId, !next.isEmpty else {
-                return result
-            }
-            guard next != beforeTurn, cursors.insert(next).inserted else {
-                throw KapError.api(code: -1, message: "对话分页游标重复，无法完成 Token 统计。")
-            }
-            beforeTurn = next
-        }
-    }
-
-    func accumulate(
-        _ turn: TranscriptTurn,
-        into result: inout SessionUsage,
-        range: TokenUsageTimeRange,
-        model: String? = nil
-    ) {
-        let hasStepUsage = turn.steps.contains { $0.usage != nil }
-        var included = false
-        if hasStepUsage {
-            for step in turn.steps {
-                guard let usage = step.usage,
-                      let date = Self.date(step.endedAt ?? step.startedAt ?? turn.endedAt ?? turn.startedAt),
-                      range.contains(date)
-                else { continue }
-                add(usage, at: date, model: step.model ?? turn.model ?? model, to: &result)
-                included = true
-            }
-        } else if let usage = turn.usage,
-                  let date = Self.date(turn.endedAt ?? turn.startedAt), range.contains(date) {
-            add(usage, at: date, model: turn.model ?? model, to: &result)
-            included = true
-        }
-        if included { result.turnCount += 1 }
-    }
-
-    private func add(_ usage: TranscriptTokenUsage, at date: Date, model: String?, to result: inout SessionUsage) {
-        result.totals.add(usage)
-        result.days[Calendar.current.startOfDay(for: date), default: TokenUsageTotals()].add(usage)
-        result.models[model ?? Self.unknownModel, default: TokenUsageTotals()].add(usage)
-    }
-
-    private func add(_ usage: TranscriptTurnUsage, at date: Date, model: String?, to result: inout SessionUsage) {
-        result.totals.add(usage)
-        result.days[Calendar.current.startOfDay(for: date), default: TokenUsageTotals()].add(usage)
-        result.models[model ?? Self.unknownModel, default: TokenUsageTotals()].add(usage)
     }
 
     private static func singleModel(in meta: JSONValue?) -> String? {

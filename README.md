@@ -93,6 +93,7 @@ xcodebuild -project KimiCode.xcodeproj -scheme KimiCode -sdk iphonesimulator \
 「已工作 X 分钟」一行，点开能看全。
 
 右上角的 **⋯** 里是这个会话的上下文占用，以及你账号的**剩余用量**（5 小时 / 每周 / 每月，有哪项显示哪项）。
+「当前订阅」下可以估算 5 小时和每周的 Token 满额用量，查看模型分段统计，并把结果生成海报分享。
 
 ### 侧栏
 

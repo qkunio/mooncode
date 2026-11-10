@@ -115,32 +115,9 @@ final class AppModel {
                 if lhs.isOnline != rhs.isOnline { return lhs.isOnline }
                 return lhs.alias.localizedCaseInsensitiveCompare(rhs.alias) == .orderedAscending
             }
-            await refreshCurrentDeviceReachability()
             errorMessage = nil
         } catch {
             handle(error)
-        }
-    }
-
-    private func refreshCurrentDeviceReachability() async {
-        guard !isDemoMode, let endpoint else {
-            reachability = DeviceReachability()
-            return
-        }
-        guard currentDevice?.isOnline != false else {
-            reachability = DeviceReachability()
-            return
-        }
-        let deviceID = endpoint.deviceID
-        let client = KapClient(endpoint: endpoint, tokenProvider: tokenProvider)
-        do {
-            _ = try await client.meta()
-            guard endpoint.deviceID == deviceID else { return }
-            reachability.update(deviceID: deviceID, isReachable: true)
-        } catch {
-            guard endpoint.deviceID == deviceID, !Task.isCancelled,
-                  (error as? URLError)?.code != .cancelled else { return }
-            reachability.update(deviceID: deviceID, isReachable: false)
         }
     }
 

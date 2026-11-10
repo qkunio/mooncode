@@ -12,12 +12,12 @@ struct KapClient: Sendable {
 
     private static let logger = Logger(subsystem: "com.qinkun.kimicode", category: "rest")
 
-    private var session: URLSession {
+    private let session: URLSession = {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 30
         configuration.waitsForConnectivity = true
         return URLSession(configuration: configuration)
-    }
+    }()
 
     // MARK: 元信息
 
