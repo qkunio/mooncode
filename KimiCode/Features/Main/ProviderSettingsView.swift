@@ -281,6 +281,27 @@ private struct StatusBadge: View {
 
 // MARK: - 默认配置
 
+/// 两处默认权限入口共用同一组图标、标题和说明。
+struct DefaultPermissionOptions: View {
+    let mode: PermissionMode
+    let select: (PermissionMode) -> Void
+
+    var body: some View {
+        Picker("默认权限", selection: Binding(get: { mode }, set: { select($0) })) {
+            ForEach(PermissionMode.allCases) { option in
+                Label {
+                    Text(option.title)
+                    Text(option.subtitle)
+                } icon: {
+                    Image(systemName: option.symbolName)
+                }
+                .tag(option)
+            }
+        }
+        .pickerStyle(.inline)
+    }
+}
+
 /// 新会话的默认权限 / 思考。默认模型已挪到侧栏个人面板；每项仍单独 `POST /config`。
 private struct DefaultsSettingsView: View {
     let client: any KapServicing
@@ -308,21 +329,9 @@ private struct DefaultsSettingsView: View {
                 LabeledContent("默认权限") {
                     // 自己画右侧的值：系统菜单 Picker 的图标和字贴得太紧。点开仍是系统菜单（带图标和说明）。
                     Menu {
-                        Picker("默认权限", selection: Binding(
-                            get: { mode },
-                            set: { save(ServerConfigPatch(defaultPermissionMode: $0)) }
-                        )) {
-                            ForEach(PermissionMode.allCases) { option in
-                                Label {
-                                    Text(option.title)
-                                    Text(option.subtitle)
-                                } icon: {
-                                    Image(systemName: option.symbolName)
-                                }
-                                .tag(option)
-                            }
+                        DefaultPermissionOptions(mode: mode) {
+                            save(ServerConfigPatch(defaultPermissionMode: $0))
                         }
-                        .pickerStyle(.inline)
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: mode.symbolName)

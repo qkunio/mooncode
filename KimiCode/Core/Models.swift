@@ -83,6 +83,19 @@ struct RemoteDeviceList: Decodable, Sendable {
     }
 }
 
+/// relay 的在线标记之外，再记录当前设备隧道的实际可达性。
+struct DeviceReachability: Sendable, Equatable {
+    private(set) var unreachableDeviceID: String?
+
+    mutating func update(deviceID: String, isReachable: Bool) {
+        unreachableDeviceID = isReachable ? nil : deviceID
+    }
+
+    func isOnline(_ device: RemoteDevice) -> Bool {
+        device.isOnline && device.deviceID != unreachableDeviceID
+    }
+}
+
 // MARK: - 本地服务元信息
 
 struct ServerMeta: Decodable, Sendable {

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 全屏个人入口：账号、默认模型 / 强度、设备显示偏好和退出登录。
+/// 全屏个人入口：账号、默认模型 / 强度 / 权限、设备显示偏好和退出登录。
 struct AccountSheet: View {
     @Binding var showsDevicesInSidebar: Bool
 
@@ -68,14 +68,15 @@ struct AccountSheet: View {
     }
 
     private var profile: some View {
-        VStack(spacing: 12) {
-            Avatar(url: app.user?.avatarURL, size: 72)
-            Text(app.user?.displayName ?? "Kimi 用户")
-                .font(.title3.weight(.semibold))
-                .lineLimit(1)
+        card {
+            HStack(spacing: 14) {
+                Avatar(url: app.user?.avatarURL, size: 48)
+                Text(app.user?.displayName ?? "Kimi 用户")
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
     }
 
     private var defaultSettings: some View {
@@ -107,6 +108,38 @@ struct AccountSheet: View {
                     app.client == nil || defaultModel == nil
                         || (defaultModel?.thinkingOptions.count ?? 0) <= 1 || isSavingDefault
                 )
+
+                Divider().padding(.vertical, 6)
+
+                Menu {
+                    DefaultPermissionOptions(
+                        mode: app.defaultPermissionMode ?? .manual,
+                        select: saveDefaultPermission
+                    )
+                } label: {
+                    HStack(spacing: 12) {
+                        Text("默认权限")
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                            .fixedSize()
+                        Spacer(minLength: 8)
+                        HStack(spacing: 6) {
+                            let mode = app.defaultPermissionMode ?? .manual
+                            Image(systemName: mode.symbolName)
+                            Text(mode.title)
+                            if isSavingDefault {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.footnote.weight(.semibold))
+                            }
+                        }
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                    }
+                    .frame(minHeight: 32)
+                }
+                .disabled(app.client == nil || isSavingDefault)
             }
             .foregroundStyle(.primary)
         }
@@ -139,13 +172,13 @@ struct AccountSheet: View {
     private func settingRow(title: String, value: String) -> some View {
         HStack(spacing: 12) {
             Text(title)
-                .font(.body.weight(.medium))
+                .font(.body)
                 .foregroundStyle(.primary)
                 .fixedSize()
             Spacer(minLength: 8)
             Text(value)
                 .font(.body)
-                .foregroundStyle(.primary)
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
             if isSavingDefault {
                 ProgressView().controlSize(.small)
@@ -178,6 +211,18 @@ struct AccountSheet: View {
             do {
                 let value = option == "on" ? defaultModel.defaultThinking : option
                 try await app.updateDefaultThinking(value)
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func saveDefaultPermission(_ mode: PermissionMode) {
+        Task {
+            isSavingDefault = true
+            defer { isSavingDefault = false }
+            do {
+                try await app.updateDefaultPermission(mode)
             } catch {
                 actionError = error.localizedDescription
             }
@@ -231,12 +276,13 @@ struct AccountSheet: View {
                 } else {
                     VStack(spacing: 0) {
                         ForEach(Array(app.devices.enumerated()), id: \.element.id) { index, device in
+                            let isOnline = app.isDeviceOnline(device)
                             Button {
                                 Task { await app.select(device) }
                             } label: {
                                 HStack(spacing: 12) {
                                     Circle()
-                                        .fill(device.isOnline ? Color.green : Color.red)
+                                        .fill(isOnline ? Color.green : Color.red)
                                         .frame(width: 8, height: 8)
                                     Text(device.shortName)
                                         .lineLimit(1)
@@ -245,18 +291,18 @@ struct AccountSheet: View {
                                         Image(systemName: "checkmark")
                                             .font(.body.weight(.semibold))
                                             .foregroundStyle(Palette.kimi)
-                                    } else if !device.isOnline {
+                                    } else if !isOnline {
                                         Text("离线")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
                                 }
-                                .foregroundStyle(device.isOnline ? .primary : .secondary)
+                                .foregroundStyle(isOnline ? .primary : .secondary)
                                 .frame(minHeight: 44)
                                 .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
-                            .disabled(!device.isOnline)
+                            .disabled(!isOnline)
                             if index + 1 < app.devices.count {
                                 Divider().padding(.leading, 20)
                             }

@@ -24,6 +24,7 @@ final class AppModel {
     private(set) var models: [ModelInfo] = []
     private(set) var defaultModelID: String?
     private(set) var defaultThinking: ServerConfigDefaults.ThinkingConfig?
+    private(set) var defaultPermissionMode: PermissionMode?
 
     /// 主页正在看的对话。
     private(set) var chat: ChatModel?
@@ -69,7 +70,13 @@ final class AppModel {
         devices.first { $0.deviceID == endpoint?.deviceID }
     }
 
-    var onlineDevices: [RemoteDevice] { devices.filter(\.isOnline) }
+    private var reachability = DeviceReachability()
+
+    var onlineDevices: [RemoteDevice] { devices.filter(reachability.isOnline) }
+
+    func isDeviceOnline(_ device: RemoteDevice) -> Bool {
+        reachability.isOnline(device)
+    }
 
     // MARK: 启动
 
@@ -108,9 +115,32 @@ final class AppModel {
                 if lhs.isOnline != rhs.isOnline { return lhs.isOnline }
                 return lhs.alias.localizedCaseInsensitiveCompare(rhs.alias) == .orderedAscending
             }
+            await refreshCurrentDeviceReachability()
             errorMessage = nil
         } catch {
             handle(error)
+        }
+    }
+
+    private func refreshCurrentDeviceReachability() async {
+        guard !isDemoMode, let endpoint else {
+            reachability = DeviceReachability()
+            return
+        }
+        guard currentDevice?.isOnline != false else {
+            reachability = DeviceReachability()
+            return
+        }
+        let deviceID = endpoint.deviceID
+        let client = KapClient(endpoint: endpoint, tokenProvider: tokenProvider)
+        do {
+            _ = try await client.meta()
+            guard endpoint.deviceID == deviceID else { return }
+            reachability.update(deviceID: deviceID, isReachable: true)
+        } catch {
+            guard endpoint.deviceID == deviceID, !Task.isCancelled,
+                  (error as? URLError)?.code != .cancelled else { return }
+            reachability.update(deviceID: deviceID, isReachable: false)
         }
     }
 
@@ -123,6 +153,7 @@ final class AppModel {
         models = []
         usage = nil
         endpoint = .remote(deviceID: device.deviceID, name: device.shortName)
+        reachability = DeviceReachability()
         // 体验模式不覆盖记住的设备：退出体验、真正登录后还要回到上次那台。
         if !isDemoMode {
             UserDefaults.standard.set(device.deviceID, forKey: Self.lastDeviceKey)
@@ -173,7 +204,7 @@ final class AppModel {
         reconcileDraft()
     }
 
-    /// 个人面板只改新会话的默认模型 / 强度，不改当前会话的模型、思考或权限。
+    /// 个人面板只改新会话的默认模型 / 强度 / 权限，不改当前会话的配置。
     func updateDefaultModel(_ id: String) async throws {
         guard let client else { return }
         let updated = try await client.updateConfig(ServerConfigPatch(defaultModel: id))
@@ -188,9 +219,16 @@ final class AppModel {
         apply(updated)
     }
 
+    func updateDefaultPermission(_ mode: PermissionMode) async throws {
+        guard let client else { return }
+        let updated = try await client.updateConfig(ServerConfigPatch(defaultPermissionMode: mode))
+        apply(updated)
+    }
+
     private func apply(_ defaults: ServerConfigDefaults) {
         defaultModelID = defaults.defaultModel
         defaultThinking = defaults.thinking
+        defaultPermissionMode = defaults.defaultPermissionMode
     }
 
     /// 打开侧栏时刷新：会话状态（忙/待确认）变化最快。
@@ -358,6 +396,7 @@ final class AppModel {
         chat?.stop()
         chat = nil
         endpoint = nil
+        reachability = DeviceReachability()
         devices = []
         workspaces = []
         sessions = []

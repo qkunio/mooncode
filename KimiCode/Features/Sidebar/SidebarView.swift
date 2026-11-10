@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// 侧栏：Moon Code（可显示横排设备）、添加文件夹、会话列表，底部是个人入口。
-/// 个人面板里管理默认模型 / 强度、设备显示偏好和退出登录。
+/// 个人面板里管理默认模型 / 强度 / 权限、设备显示偏好和退出登录。
 
 struct SidebarView: View {
     let close: () -> Void

@@ -29,18 +29,19 @@ struct DeviceStrip: View {
 
     private func deviceButton(_ device: RemoteDevice) -> some View {
         let isCurrent = device.deviceID == app.endpoint?.deviceID
+        let isOnline = app.isDeviceOnline(device)
         return Button {
             Task { await app.select(device) }
         } label: {
             HStack(spacing: 7) {
                 Circle()
-                    .fill(device.isOnline ? Color.green : Color.red)
+                    .fill(isOnline ? Color.green : Color.red)
                     .frame(width: 7, height: 7)
                 Text(device.shortName)
                     .font(.subheadline.weight(isCurrent ? .semibold : .regular))
                     .lineLimit(1)
             }
-            .foregroundStyle(device.isOnline ? .primary : .secondary)
+            .foregroundStyle(isOnline ? .primary : .secondary)
             .padding(.horizontal, 12)
             .frame(minHeight: 34)
             .background(
@@ -50,8 +51,8 @@ struct DeviceStrip: View {
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)
-        .disabled(!device.isOnline)
-        .accessibilityLabel("\(device.shortName)，\(device.isOnline ? "在线" : "离线")")
+        .disabled(!isOnline)
+        .accessibilityLabel("\(device.shortName)，\(isOnline ? "在线" : "离线")")
         .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
 }

@@ -76,6 +76,17 @@ import Foundation
         let completed = try TranscriptState(page: decode(TranscriptPage.self, from: completedPage))
         precondition(!completed.isTurnActive)
 
+        let device = try decode(RemoteDevice.self, from: #"{"device_id":"mac","alias":"Mac","platform":"darwin","status":"online"}"#)
+        let offlineDevice = try decode(RemoteDevice.self, from: #"{"device_id":"old","alias":"Old","platform":"darwin","status":"offline"}"#)
+        var reachability = DeviceReachability()
+        precondition(reachability.isOnline(device) && !reachability.isOnline(offlineDevice))
+        reachability.update(deviceID: "mac", isReachable: false)
+        precondition(!reachability.isOnline(device))
+        reachability.update(deviceID: "other", isReachable: false)
+        precondition(reachability.isOnline(device))
+        reachability.update(deviceID: "other", isReachable: true)
+        precondition(reachability.isOnline(device) && !reachability.isOnline(offlineDevice))
+
         let modelPatch = try object(ServerConfigPatch(defaultModel: "kimi-code/k3"))
         precondition(modelPatch.count == 1 && modelPatch["default_model"] as? String == "kimi-code/k3")
         let thinkingPatch = try object(ServerConfigPatch(
@@ -84,6 +95,8 @@ import Foundation
         precondition(thinkingPatch.count == 1)
         let thinking = thinkingPatch["thinking"] as? [String: Any]
         precondition(thinking?["enabled"] as? Bool == true && thinking?["effort"] as? String == "high")
+        let permissionPatch = try object(ServerConfigPatch(defaultPermissionMode: .yolo))
+        precondition(permissionPatch.count == 1 && permissionPatch["default_permission_mode"] as? String == "yolo")
 
         print("PASS: legacy status, strict agent/usage, running state, interaction frames, response bodies and default config patches")
     }
