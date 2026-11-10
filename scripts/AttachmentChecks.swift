@@ -57,6 +57,9 @@ private actor AttachmentCheckClient: KapServicing {
         try await base.downloadFile(sessionID, path: path)
     }
     func sessions(pageSize: Int) async throws -> SessionList { try await base.sessions(pageSize: pageSize) }
+    func sessionPage(pageSize: Int, beforeID: String?, includeArchive: Bool) async throws -> SessionList {
+        try await base.sessionPage(pageSize: pageSize, beforeID: beforeID, includeArchive: includeArchive)
+    }
     func models() async throws -> [ModelInfo] { try await base.models() }
     func configDefaults() async throws -> ServerConfigDefaults { try await base.configDefaults() }
     func updateConfig(_ patch: ServerConfigPatch) async throws -> ServerConfigDefaults {
@@ -315,6 +318,10 @@ struct AttachmentChecks {
         precondition(outside.localizedDescription == "无法访问此文件：路径超出当前工作区，或符号链接指向工作区外。请选择工作区内的文件。")
         let other = KapError.api(code: KapErrorCode.fileNotFound, message: "Path outside workspace (read): /tmp/test")
         precondition(other.localizedDescription == "Path outside workspace (read): /tmp/test（code 40409）")
+        precondition(KapError.http(status: 0, body: "Not connected").localizedDescription == "当前设备已离线。")
+        precondition(KapError.api(code: -1, message: "Not connected").localizedDescription == "当前设备已离线。")
+        precondition(KapError.notConnected.localizedDescription == "当前设备已离线。")
+        precondition(KapError.http(status: 500, body: "other failure").localizedDescription == "HTTP 500：other failure")
 
         let mediaSource = AttachmentSource(.object(["kind": .string("session_media"), "fileId": .string("f_photo")]))
         precondition(mediaSource == .sessionMedia("f_photo"))

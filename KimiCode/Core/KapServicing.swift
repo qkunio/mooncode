@@ -11,6 +11,7 @@ protocol KapServicing: Sendable {
     func readFile(_ sessionID: String, path: String) async throws -> FsContent
     func downloadFile(_ sessionID: String, path: String) async throws -> URL
     func sessions(pageSize: Int) async throws -> SessionList
+    func sessionPage(pageSize: Int, beforeID: String?, includeArchive: Bool) async throws -> SessionList
     func models() async throws -> [ModelInfo]
     func configDefaults() async throws -> ServerConfigDefaults
     /// 改电脑上的新会话默认值（默认模型 / 权限 / 思考）。

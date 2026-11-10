@@ -152,7 +152,7 @@ private struct UsageSheet: View {
 }
 
 /// 卡片上方的灰色小标题 + 卡片。
-private struct UsageSection<Content: View>: View {
+struct UsageSection<Content: View>: View {
     let title: String
     @ViewBuilder var content: Content
 
@@ -167,7 +167,7 @@ private struct UsageSection<Content: View>: View {
     }
 }
 
-private struct UsageCard: View {
+struct UsageCard: View {
     let title: String
     let value: String
     let ratio: Double
@@ -201,7 +201,7 @@ private struct UsageCard: View {
 }
 
 /// 横条：浅色同色系轨道，上面按占比填深色。
-private struct UsageBar: View {
+struct UsageBar: View {
     let ratio: Double
     let tint: Color
 

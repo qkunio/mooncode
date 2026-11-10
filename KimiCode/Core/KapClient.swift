@@ -28,7 +28,13 @@ struct KapClient: Sendable {
     // MARK: 会话
 
     func sessions(pageSize: Int = 100) async throws -> SessionList {
-        try await get("sessions", query: ["page_size": String(pageSize)])
+        try await sessionPage(pageSize: pageSize, beforeID: nil, includeArchive: false)
+    }
+
+    func sessionPage(pageSize: Int, beforeID: String?, includeArchive: Bool) async throws -> SessionList {
+        var query = ["page_size": String(pageSize), "include_archive": String(includeArchive)]
+        if let beforeID { query["before_id"] = beforeID }
+        return try await get("sessions", query: query)
     }
 
     func workspaces() async throws -> [Workspace] {

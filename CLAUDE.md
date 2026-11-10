@@ -60,12 +60,13 @@ diff/文件卡片、看子 agent 与 task 面板、终端流）。
 
 | 元素 | 接口 | 备注 |
 |---|---|---|
-| 设备列表 | relay `GET /v1/remote/devices` | 顺序沿用现有在线优先、名称排序。个人面板的「在会话栏中显示设备列表」开关存 `kimi.showsDevicesInSidebar`，默认开启（保留用户手动关闭的选择）。开启时在 Moon Code 下横排，在线绿点 / 离线红点，上下留白各 14pt，右侧 56pt 渐隐，滚动区域右缘与添加文件夹 + 对齐；进入侧栏立即静默刷新，之后每 3 秒一次，收起侧栏或关闭开关停止，不提供拽放 / 刷新入口。关闭时个人面板显示全部设备和刷新按钮，勾选当前设备。离线均列出但禁用。除 relay 状态外，每次刷新还检查当前设备 `GET /api/v1/meta` 的可达性，失败时当前设备也显示红点，恢复后清除；手机本身断网导致设备列表请求失败时不据此误判电脑离线 |
+| 设备列表 | relay `GET /v1/remote/devices` | 顺序沿用现有在线优先、名称排序。个人面板的「在会话栏中显示设备列表」开关存 `kimi.showsDevicesInSidebar`，默认开启（保留用户手动关闭的选择）。开启时在 Moon Code 下横排，在线绿点 / 离线红点，上下留白各 14pt，右侧 56pt 渐隐，滚动区域右缘与添加文件夹 + 对齐；进入侧栏立即静默刷新，之后每 3 秒一次，收起侧栏或关闭开关停止，不提供拽放 / 刷新入口。关闭时个人面板显示全部设备和刷新按钮，勾选当前设备。离线均列出但禁用。设备点仅按设备列表的 `online` / `offline` 状态显示，不使用 `/meta` 做可达性判定 |
 | 添加项目（设备下方） | `GET /fs:home` → `GET /fs:browse?path=` 逐级浏览 → `POST /workspaces {root}`（按 root 幂等） | 照网页端 AddWorkspaceDialog：上一级 / 面包屑 / 子文件夹列表 / 当前目录下模糊搜索（最多 6 层、600 个目录、150 条，同批 6 并发）/「打开此文件夹」；加完在新项目开新对话并收起侧栏 |
 | 文件夹 | `GET /workspaces` → `{items:[{id,root,name,last_opened_at,session_count}]}` | 按 `last_opened_at` 倒序 |
 | 文件夹下的会话 | `GET /sessions` 按 `workspace_id` 分组；点文件夹名展开/收起（无箭头） | 已归档的、挂不上任何文件夹的都不显示 |
 | 文件夹旁 + | 草稿；第一条消息时 `POST /sessions {metadata:{cwd:root}, workspace_id, agent_config}` | 与网页端 `createSession` 同形 |
 | 头像 + 昵称 | `GET /oauth/userinfo` → `userInfo.{nickname, avatar}` | 响应里还有手机号等，**只解码这两个字段**。无昵称显示「Kimi 用户」。侧栏底部显示「头像 昵称 ›」，打开全屏 `AccountSheet`；顶部为头像和昵称横向排列的卡片，底部退出登录（体验模式为退出体验） |
+| 个人面板「当前设备的额度看板」 | 套餐：`GET /oauth/usage`；Token：完整分页 `GET /sessions`（含归档）+ 各会话 `GET /transcript` | 5 小时与每周统计并发加载，分别按额度的 `resetAt` 确定当前周期（缺失时回退到近 5 小时 / 近 7 天）。两条模型分段条形图展示 `周期 Token ÷ 已用额度比例` 的预估总量、已使用量和按输入加权的平均缓存命中；步骤 / 任务直接带模型或旧版 `byModel` 仅一个模型时才归类，其余显示「未记录模型」。新版无步骤用量时回退到 `turn.usage`；底部仅保留 info 图标，说明多台机器使用订阅可能产生偏差 |
 | 个人面板默认配置 | `GET /config` 的 `default_model` / `thinking` / `default_permission_mode`；选择后 `POST /config` 只带改动的字段 | 三行「默认模型」「默认强度」「默认权限」，无「新会话」标题或副标题，标题用常规字重，右侧值及权限图标用 `.secondary`。模型复用 `DefaultModelList` 按来源分组；强度用 `DefaultThinkingList`，off 排最前，选 on 时落模型默认强度；权限复用 `DefaultPermissionOptions` 的菜单。只改新会话默认值，不改当前会话；供应商管理及原默认权限 / 思考配置仍保留 |
 | 退出登录 | 本地清凭证 | 个人面板最底部，alert「是否退出登录？」→ 取消 / 退出 |
 | 权限图标 | 2.5+ WS 全量 `agent.permission_mode`；旧版 `GET /sessions/{id}/status` 的 `permission` | composer 上只显示图标（hand.raised / checkmark.shield / bolt.shield），文字只在菜单里。**标签映射别弄反**：`manual`=始终询问、`yolo`=必要时询问、`auto`=完全自动 |

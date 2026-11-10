@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 全屏个人入口：账号、默认模型 / 强度 / 权限、设备显示偏好和退出登录。
+/// 全屏个人入口：账号、当前设备额度看板、默认模型 / 强度 / 权限、设备显示偏好和退出登录。
 struct AccountSheet: View {
     @Binding var showsDevicesInSidebar: Bool
 
@@ -14,6 +14,7 @@ struct AccountSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     profile
+                    usageDashboard
                     defaultSettings
 
                     card {
@@ -76,6 +77,42 @@ struct AccountSheet: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
+        }
+    }
+
+    private var usageDashboard: some View {
+        card {
+            NavigationLink {
+                if let client = app.client {
+                    DeviceUsageDashboard(
+                        client: client,
+                        deviceName: app.currentDevice?.shortName ?? app.endpoint?.displayName ?? "当前设备"
+                    )
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "chart.bar.fill")
+                        .font(.body)
+                        .foregroundStyle(Palette.kimi)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("当前设备的额度看板")
+                            .font(.body)
+                        Text("套餐额度与 Token 用量")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.forward")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(.primary)
+                .frame(minHeight: 40)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .disabled(app.client == nil)
         }
     }
 

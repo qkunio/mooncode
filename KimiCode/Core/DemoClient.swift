@@ -50,8 +50,12 @@ extension DemoClient: KapServicing {
         try DemoData.downloadFile(at: path)
     }
 
-    func sessions(pageSize _: Int) async throws -> SessionList {
-        await backend.sessions(deviceID: deviceID)
+    func sessions(pageSize: Int) async throws -> SessionList {
+        await backend.sessions(deviceID: deviceID, pageSize: pageSize, beforeID: nil)
+    }
+
+    func sessionPage(pageSize: Int, beforeID: String?, includeArchive _: Bool) async throws -> SessionList {
+        await backend.sessions(deviceID: deviceID, pageSize: pageSize, beforeID: beforeID)
     }
 
     func models() async throws -> [ModelInfo] { DemoData.models }
@@ -255,8 +259,13 @@ private actor DemoBackend {
             """)
     }
 
-    func sessions(deviceID: String) -> SessionList {
-        SessionList(items: state(for: deviceID).sessions, hasMore: false)
+    func sessions(deviceID: String, pageSize: Int, beforeID: String?) -> SessionList {
+        let sessions = state(for: deviceID).sessions
+        let start = beforeID.flatMap { id in
+            sessions.firstIndex(where: { $0.id == id }).map { $0 + 1 }
+        } ?? 0
+        let end = min(start + max(pageSize, 1), sessions.count)
+        return SessionList(items: Array(sessions[start ..< end]), hasMore: end < sessions.count)
     }
 
     // MARK: 会话
@@ -643,7 +652,9 @@ private enum DemoData {
     static let readOnly = KapError.api(code: -1, message: "体验模式下不能修改模型配置。登录后可以管理电脑上的模型供应商。")
 
     static let usage: PlanUsage = decode("""
-        {"quota":{"usages":{"limit5h":{"usedRatio":0.42},"monthTotal":{"usedRatio":0.63}}}}
+        {"quota":{"usages":{"limit5h":{"usedRatio":0.42,"resetAt":"\(iso(Date().addingTimeInterval(3_600)))"},\
+        "limit7d":{"usedRatio":0.57,"resetAt":"\(iso(Date().addingTimeInterval(3 * 86_400)))"},\
+        "monthTotal":{"usedRatio":0.63}}}}
         """)
 
     static let user: KimiUser = decode(#"{"nickname":"体验用户"}"#)
@@ -785,6 +796,7 @@ private enum DemoData {
             step = """
                 [{"stepId":"\(turn.turnID).s1","turnId":"\(turn.turnID)","ordinal":1,"state":"completed",\
                 "startedAt":"\(iso(turn.startedAt))","endedAt":"\(iso(turn.endedAt ?? turn.startedAt))",\
+                "usage":{"inputOther":1200,"output":300,"inputCacheRead":600,"inputCacheCreation":100},\
                 "frames":[\(turn.frames.joined(separator: ","))]}]
                 """
         }
@@ -817,7 +829,7 @@ private enum DemoData {
             """)
     }
 
-    /// `meta.agent` 随正文一起推：模型 / 思考强度 / 权限 / 上下文圈都从这里读。
+    /// `meta.agent` 随正文一起推：模型 / 模型用量 / 思考强度 / 权限 / 上下文圈都从这里读。
     static func meta(activity: String, profile: DemoBackend.Profile?, tokens: Int) -> String {
         let model = profile?.model ?? "kimi-code/k3"
         let effort = profile?.thinking ?? "low"
@@ -825,6 +837,7 @@ private enum DemoData {
         return """
             {"activity":"\(activity)","agent":{"model":\(quoted(model)),\
             "thinkingEffort":\(quoted(effort)),"permission":\(quoted(permission)),\
+            "usage":{"byModel":{\(quoted(model)):{"inputOther":0,"output":0,"inputCacheRead":0,"inputCacheCreation":0}}},\
             "contextTokens":\(tokens),"maxContextTokens":262144,\
             "contextUsage":\(Double(tokens) / 262144)}}
             """
