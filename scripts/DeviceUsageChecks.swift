@@ -78,7 +78,38 @@ struct DeviceUsageChecks {
             start: now.addingTimeInterval(-60), end: now.addingTimeInterval(-50)
         ))
         precondition(empty.totals.total == 0 && empty.sessionCount == 0)
-        print("PASS: old/new transcript usage, optional cache fields, range boundaries, session pagination and demo dashboard aggregation")
+        let success: JSONValue = try KapClient.decodeEnvelope(
+            Data(#"{"code":0,"msg":"success","data":{"ok":true}}"#.utf8), status: 200, path: "check"
+        )
+        precondition(success["ok"]?.boolValue == true)
+        do {
+            let _: JSONValue = try KapClient.decodeEnvelope(
+                Data(#"{"code":0,"msg":"success","data":null}"#.utf8), status: 200, path: "check"
+            )
+            preconditionFailure("Missing data must not become a code-0 API error")
+        } catch KapError.decoding(_, _) {
+        } catch KapError.api(let code, _) {
+            preconditionFailure("Unexpected API code \(code)")
+        }
+        do {
+            let _: UploadedFile = try KapClient.decodeEnvelope(
+                Data(#"{"code":0,"msg":"success","data":{"id":1}}"#.utf8), status: 200, path: "check"
+            )
+            preconditionFailure("Malformed success data must fail decoding")
+        } catch KapError.decoding(_, _) {
+        } catch KapError.api(let code, _) {
+            preconditionFailure("Unexpected API code \(code)")
+        }
+        do {
+            let _: UploadedFile = try KapClient.decodeEnvelope(
+                Data(#"{"code":50000,"msg":"failed","data":null}"#.utf8), status: 200, path: "check"
+            )
+            preconditionFailure("Expected a business error")
+        } catch KapError.api(let code, _) {
+            precondition(code == 50000)
+        }
+
+        print("PASS: usage, pagination, demo aggregation and envelope code-0 handling")
     }
 
     private static func iso(_ date: Date) -> String {

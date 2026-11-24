@@ -43,7 +43,6 @@ struct UsagePosterView: View {
     let weeklyRange: TokenUsageTimeRange
 
     private let ink = Color(red: 0.02, green: 0.02, blue: 0.02)
-    private let blue = Color(red: 0.063, green: 0.208, blue: 1)
     private let paper = Color(red: 0.973, green: 0.953, blue: 0.914)
 
     var body: some View {
@@ -114,7 +113,7 @@ struct UsagePosterView: View {
                         Rectangle()
                             .fill(Color(.tertiarySystemFill))
                             .overlay(alignment: .leading) {
-                                Rectangle().fill(blue).frame(width: proxy.size.width * ratio)
+                                Rectangle().fill(Palette.kimi).frame(width: proxy.size.width * ratio)
                             }
                     }
                     .frame(height: 32)
@@ -140,7 +139,7 @@ struct UsagePosterView: View {
                             .font(.system(size: 28, weight: .semibold, design: .serif))
                         Text(TokenUsageFormat.modelName(preferredModel))
                             .font(.system(size: 52, weight: .bold, design: .serif))
-                            .foregroundStyle(blue)
+                            .foregroundStyle(ink)
                             .lineLimit(2)
                             .minimumScaleFactor(0.45)
                             .fixedSize(horizontal: false, vertical: true)

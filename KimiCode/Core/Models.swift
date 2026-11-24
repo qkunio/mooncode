@@ -99,7 +99,9 @@ struct DeviceReachability: Sendable, Equatable {
 // MARK: - 本地服务元信息
 
 struct ServerMeta: Decodable, Sendable {
+    let kimiAgentProtocolVersion: String?
     let serverVersion: String
+    let product: String?
     let serverID: String?
     let backend: String?
     let dangerousBypassAuth: Bool?
@@ -112,16 +114,41 @@ struct ServerMeta: Decodable, Sendable {
         var mcp = false
         var tasks = false
         var terminal = false
+        var interactionsList = false
+        var sessionWait = false
 
         enum CodingKeys: String, CodingKey {
             case websocket, mcp, tasks, terminal
             case fileUpload = "file_upload"
             case fsQuery = "fs_query"
+            case interactionsList = "interactions_list"
+            case sessionWait = "session_wait"
+        }
+
+        init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            websocket = (try? c.decodeIfPresent(Bool.self, forKey: .websocket)) ?? false
+            fileUpload = (try? c.decodeIfPresent(Bool.self, forKey: .fileUpload)) ?? false
+            fsQuery = (try? c.decodeIfPresent(Bool.self, forKey: .fsQuery)) ?? false
+            mcp = (try? c.decodeIfPresent(Bool.self, forKey: .mcp)) ?? false
+            tasks = (try? c.decodeIfPresent(Bool.self, forKey: .tasks)) ?? false
+            terminal = (try? c.decodeIfPresent(Bool.self, forKey: .terminal)) ?? false
+            interactionsList = (try? c.decodeIfPresent(Bool.self, forKey: .interactionsList)) ?? false
+            sessionWait = (try? c.decodeIfPresent(Bool.self, forKey: .sessionWait)) ?? false
         }
     }
 
+    /// 2.7+ 明确返回 `kimi_agent_protocol_version`；2.6.x 通过主次版本号识别。
+    var usesConversationProtocol: Bool {
+        if let kimiAgentProtocolVersion, !kimiAgentProtocolVersion.isEmpty { return true }
+        let parts = serverVersion.split(separator: ".").compactMap { Int($0.prefix(while: \.isNumber)) }
+        guard parts.count >= 2 else { return false }
+        return parts[0] > 2 || (parts[0] == 2 && parts[1] >= 6)
+    }
+
     enum CodingKeys: String, CodingKey {
-        case backend, capabilities
+        case product, backend, capabilities
+        case kimiAgentProtocolVersion = "kimi_agent_protocol_version"
         case serverVersion = "server_version"
         case serverID = "server_id"
         case dangerousBypassAuth = "dangerous_bypass_auth"
@@ -133,9 +160,11 @@ struct ServerMeta: Decodable, Sendable {
 struct SessionSummary: Decodable, Identifiable, Hashable, Sendable {
     let id: String
     let workspaceID: String?
+    let cwd: String?
     let title: String?
     let createdAt: FlexibleDate?
     let updatedAt: FlexibleDate?
+    let activity: String?
     let busy: Bool
     let mainTurnActive: Bool?
     let pendingInteraction: PendingInteraction
@@ -157,7 +186,7 @@ struct SessionSummary: Decodable, Identifiable, Hashable, Sendable {
     }
 
     struct Metadata: Decodable, Hashable, Sendable {
-        let cwd: String
+        let cwd: String?
     }
 
     struct AgentConfig: Decodable, Hashable, Sendable {
@@ -182,29 +211,91 @@ struct SessionSummary: Decodable, Identifiable, Hashable, Sendable {
         }
     }
 
+    /// 2.7+ 把 cwd 提到顶层；旧版在 `metadata.cwd`。
+    var resolvedCWD: String? {
+        if let cwd, !cwd.isEmpty { return cwd }
+        if let legacy = metadata?.cwd, !legacy.isEmpty { return legacy }
+        return nil
+    }
+
     /// 列表里显示的标题：没有标题就退回最后一条 prompt，再退回 cwd 的目录名。
     var displayTitle: String {
         if let title, !title.isEmpty { return title }
         if let lastPrompt, !lastPrompt.isEmpty { return lastPrompt }
-        if let cwd = metadata?.cwd { return (cwd as NSString).lastPathComponent }
+        if let cwd = resolvedCWD { return (cwd as NSString).lastPathComponent }
         return "未命名会话"
     }
 
     var folderName: String? {
-        guard let cwd = metadata?.cwd else { return nil }
+        guard let cwd = resolvedCWD else { return nil }
         return (cwd as NSString).lastPathComponent
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, busy, archived, metadata, usage
+        case id, cwd, title, activity, busy, archived, metadata, usage
         case workspaceID = "workspace_id"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case mainTurnActive = "main_turn_active"
         case pendingInteraction = "pending_interaction"
         case lastTurnReason = "last_turn_reason"
+        case lastTurnOutcome = "last_turn_outcome"
         case lastPrompt = "last_prompt"
         case agentConfig = "agent_config"
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        workspaceID = try c.decodeIfPresent(String.self, forKey: .workspaceID)
+        cwd = try c.decodeIfPresent(String.self, forKey: .cwd)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        createdAt = try c.decodeIfPresent(FlexibleDate.self, forKey: .createdAt)
+        updatedAt = try c.decodeIfPresent(FlexibleDate.self, forKey: .updatedAt)
+        activity = try c.decodeIfPresent(String.self, forKey: .activity)
+        if let legacyBusy = try c.decodeIfPresent(Bool.self, forKey: .busy) {
+            busy = legacyBusy
+        } else if let activity {
+            busy = activity != "idle"
+        } else {
+            busy = false
+        }
+        if let legacyActive = try c.decodeIfPresent(Bool.self, forKey: .mainTurnActive) {
+            mainTurnActive = legacyActive
+        } else if let activity {
+            mainTurnActive = activity == "turn"
+        } else {
+            mainTurnActive = nil
+        }
+        pendingInteraction = try c.decodeIfPresent(PendingInteraction.self, forKey: .pendingInteraction) ?? .none
+        lastTurnReason = try c.decodeIfPresent(String.self, forKey: .lastTurnReason)
+            ?? (try c.decodeIfPresent(String.self, forKey: .lastTurnOutcome))
+        archived = try c.decodeIfPresent(Bool.self, forKey: .archived)
+        lastPrompt = try c.decodeIfPresent(String.self, forKey: .lastPrompt)
+        metadata = try? c.decodeIfPresent(Metadata.self, forKey: .metadata)
+        usage = try? c.decodeIfPresent(Usage.self, forKey: .usage)
+        agentConfig = try? c.decodeIfPresent(AgentConfig.self, forKey: .agentConfig)
+    }
+}
+
+/// `POST /sessions/{id}/profile` 响应：2.7+ 返回 `{ session, agent }`，旧版直接返回扁平 `SessionSummary`。
+struct SessionProfileResponse: Decodable, Sendable {
+    let session: SessionSummary
+    let agent: SessionAgentState?
+
+    private enum CodingKeys: String, CodingKey {
+        case session, agent
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let wrapped = try c.decodeIfPresent(SessionSummary.self, forKey: .session) {
+            session = wrapped
+            agent = try? c.decodeIfPresent(SessionAgentState.self, forKey: .agent)
+        } else {
+            session = try SessionSummary(from: decoder)
+            agent = nil
+        }
     }
 }
 
@@ -924,6 +1015,7 @@ enum ProviderWireType: String, CaseIterable, Identifiable, Sendable {
     case kimi, openai
     case openaiResponses = "openai_responses"
     case anthropic
+    case bedrock
     case googleGenAI = "google-genai"
     case vertexAI = "vertexai"
 
@@ -935,6 +1027,7 @@ enum ProviderWireType: String, CaseIterable, Identifiable, Sendable {
         case .openai: "OpenAI"
         case .openaiResponses: "OpenAI Responses"
         case .anthropic: "Anthropic"
+        case .bedrock: "Amazon Bedrock"
         case .googleGenAI: "Google GenAI"
         case .vertexAI: "Vertex AI"
         }

@@ -23,11 +23,11 @@ struct ComposerConfig: Codable, Equatable, Sendable {
 ///   - 新对话草稿：只知道在哪个文件夹（工作区），第一条消息发出时才 `POST /sessions`
 ///
 /// 运行时与官方网页端一致：
-///   - 正文：`GET /transcript` 首屏 + WS `subscribe_v2` 逐字增量，本地按 apply.ts 应用
-///   - 是否在跑：新版读全量 agent.status；旧版用 transcript meta / turn，重试读 step.retry 或旧 phase
-///   - 配置与用量：新版读全量 agent / usage；旧版回退到 REST status 与 transcript meta
-///   - 权限确认、提问：新版读 interaction 帧并走统一回写；旧版用 REST pending 列表与旧回写
-///   - 只做「发送」和「停止」：忙时不发（不排队），停止走 `:abort`
+///   - 正文：2.6+ 用 turns REST + turns/items WS；旧版用 transcript REST + subscribe_v2 增量
+///   - 是否在跑：新版读全量 agent.status / agent.compacting；旧版用 transcript meta / turn，重试读 step.retry 或旧 phase
+///   - 配置与用量：新版读全量 agent / context（2.5–2.6 为 usage）；旧版回退到 REST status 与 transcript meta
+///   - 权限确认、提问：2.7+ 支持 `GET /interactions` + `interaction` 帧与统一回写；2.4–2.6 用 `interaction` 帧；旧版用 REST pending 列表与旧回写
+///   - 只做「发送」和「停止」：忙时不发（不排队），停止走 2.7+ `:cancel`（旧版回退 `:abort`）
 @MainActor
 @Observable
 final class ChatModel {
@@ -35,6 +35,8 @@ final class ChatModel {
     let workspace: Workspace?
 
     private(set) var transcript = TranscriptState()
+    /// 2.6+ 保留原始 turns 状态，再投影成现有 transcript 视图模型。
+    private var conversation: ConversationState?
     /// 由 transcript 派生的对话流（用户气泡 / 助手消息 / 压缩分隔）。
     private(set) var entries: [ChatEntry] = []
     /// 正文每变一次加一，给「停在底部就跟随」用。
@@ -93,10 +95,11 @@ final class ChatModel {
     /// 草稿刚建成会话、第一条消息还没发出：服务端此时还是默认配置（建会话时不采纳 agent_config），
     /// 别让它覆盖 composer 上选好的值 —— 第一条消息会把模型 / 思考强度 / 权限一起带上。
     private var holdsLocalConfig = false
-    /// 只有收到严格解码的 agent 全量帧，才确认新版状态协议；usage 不能单独证明配置通道可用。
+    /// 只有收到严格解码的 agent 全量帧，才确认新版状态协议；usage/context 不能单独证明配置通道可用。
     private var usesStateStream = false
     private var legacyStatusUnavailable = false
-    private var agentActivity: String?
+    private var detectedWireProtocol: TranscriptProtocol?
+    private var agentState: SessionAgentState?
     private var interactions = PendingInteractions()
     private var interactionProtocol: InteractionProtocol = .unknown
     private var subscriptionError: String?
@@ -126,6 +129,7 @@ final class ChatModel {
     /// 否则会先应用到旧数据上、再被重拉结果整个盖掉。
     private var activeReloads = 0
     private var bufferedTranscript: [TranscriptWireEvent] = []
+    private var bufferedConversation: [ConversationWireEvent] = []
     /// 连续收到「空快照」的次数，用来退避重拉（网页端 `emptyResetRetries`）。
     private var emptyResetRetries = 0
     private let interactionRefresh = RefreshScheduler()
@@ -178,9 +182,9 @@ final class ChatModel {
 
     // MARK: 运行态
 
-    /// 新版 agent.status 是权威值；首帧到达前及旧版使用 transcript 的活动状态。
+    /// 新版 agent.status / agent.compacting 是权威值；首帧到达前及旧版使用 transcript 的活动状态。
     var isWorking: Bool {
-        let serverActive = agentActivity.map { $0 != "idle" } ?? transcript.isTurnActive
+        let serverActive = agentState?.isWorking ?? transcript.isTurnActive
         return serverActive || isSending || awaitingTurn
     }
 
@@ -219,7 +223,8 @@ final class ChatModel {
         case "cancelled":
             return .cancelled
         case "failed":
-            let maxSteps = last.error?.contains("maxSteps") == true || last.error?.contains("max_steps") == true
+            let maxSteps = last.endReason == "max_steps"
+                || last.error?.contains("maxSteps") == true || last.error?.contains("max_steps") == true
             return .failed(maxSteps: maxSteps, message: last.error, meta: maxSteps ? "loop.max_steps_exceeded" : nil)
         default:
             return nil
@@ -228,6 +233,7 @@ final class ChatModel {
 
     /// 最近一次压缩开始了、还没完成：「正在压缩上下文…」
     var isCompacting: Bool {
+        if let agentState { return agentState.isCompacting }
         for item in transcript.items.reversed() {
             guard case let .marker(marker) = item, marker.marker == "compaction" else { continue }
             return marker.payload?["phase"]?.stringValue == "started"
@@ -247,12 +253,28 @@ final class ChatModel {
         }
         guard streamTask == nil else { return }
         connectionState = .connecting
-        let stream = EventStream(endpoint: endpoint, tokenProvider: tokenProvider)
+        let wireProtocol: TranscriptProtocol
+        if let detectedWireProtocol {
+            wireProtocol = detectedWireProtocol
+        } else if (try? await client.serverMeta())?.usesConversationProtocol == true {
+            wireProtocol = .conversation
+            detectedWireProtocol = .conversation
+            if conversation == nil { conversation = ConversationState() }
+        } else {
+            wireProtocol = .legacy
+        }
+        let stream = EventStream(
+            endpoint: endpoint,
+            wireProtocol: wireProtocol,
+            tokenProvider: tokenProvider
+        )
         self.stream = stream
         let signals = await stream.start()
         // 会话事件（权限确认 / 提问的通知）+ 正文增量。
         await stream.subscribe(to: sessionID)
-        await stream.subscribeTranscript(sessionID, since: transcript.seq)
+        if wireProtocol == .legacy {
+            await stream.subscribeTranscript(sessionID, since: transcript.seq)
+        }
         streamTask = Task { [weak self] in
             for await signal in signals {
                 await self?.handle(signal)
@@ -345,14 +367,26 @@ final class ChatModel {
             activeReloads -= 1
             if activeReloads == 0 {
                 let pending = bufferedTranscript
+                let pendingConversation = bufferedConversation
                 bufferedTranscript = []
+                bufferedConversation = []
                 for event in pending { apply(event) }
+                for event in pendingConversation { apply(event) }
             }
         }
         do {
             async let page = client.transcript(sessionID)
             async let status = legacyStatus(sessionID)
-            transcript = TranscriptState(page: try await page)
+            let loaded = try await page
+            detectedWireProtocol = loaded.wireProtocol
+            if let page = loaded.conversation {
+                if conversation == nil { conversation = ConversationState() }
+                conversation?.replaceLatest(page)
+                transcript = conversation?.transcriptState ?? TranscriptState()
+            } else {
+                conversation = nil
+                transcript = TranscriptState(page: loaded)
+            }
             rebuild()
             // 正文一到就撤骨架：后面的 status / 确认拉取还在路上，不该挡着已到的内容。
             isLoading = false
@@ -384,8 +418,15 @@ final class ChatModel {
         isLoadingOlder = true
         defer { isLoadingOlder = false }
         do {
-            let page = try await client.transcript(sessionID, beforeTurn: first.turnId)
-            transcript.prepend(older: page)
+            let page = try await client.transcript(
+                sessionID, pageSize: 30, beforeTurn: first.turnId, beforeOrdinal: first.ordinal
+            )
+            if let older = page.conversation {
+                conversation?.prepend(older: older)
+                transcript = conversation?.transcriptState ?? transcript
+            } else {
+                transcript.prepend(older: page)
+            }
             rebuild()
         } catch {
             guard !(error is CancellationError) else { return }
@@ -395,6 +436,21 @@ final class ChatModel {
 
     private func refreshInteractions() async {
         guard let sessionID, interactionProtocol != .frames else { return }
+        if interactionProtocol == .unknown {
+            do {
+                let list = try await client.pendingInteractions(sessionID)
+                guard interactionProtocol != .frames else { return }
+                interactionProtocol = .frames
+                interactions.replaceLegacy(approvals: list.approvals, questions: list.questions)
+                return
+            } catch KapError.http(status: 404, body: _) {
+            } catch let KapError.api(code, _) where code == KapErrorCode.notFound {
+            } catch {
+                guard interactionProtocol != .frames else { return }
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
         do {
             async let approvals = client.pendingApprovals(sessionID)
             async let questions = client.pendingQuestions(sessionID)
@@ -443,7 +499,7 @@ final class ChatModel {
 
     private func apply(_ state: SessionAgentState) {
         usesStateStream = true
-        agentActivity = state.status
+        agentState = state
         guard !holdsLocalConfig else { return }
         config = ComposerConfig(
             permission: state.permission ?? config.permission,
@@ -670,9 +726,13 @@ final class ChatModel {
 
     /// 撤销这条用户消息及其后的内容，原文放回输入框。
     func undo(_ entry: UserEntry) async {
-        guard let sessionID, let count = entry.undoCount, !isWorking else { return }
+        guard let sessionID, entry.undoCount != nil, !isWorking else { return }
         do {
-            try await client.undo(sessionID, count: count)
+            if conversation != nil, let turnID = entry.undoTurnID {
+                try await client.undo(sessionID, turnID: turnID)
+            } else if let count = entry.undoCount {
+                try await client.undo(sessionID, count: count)
+            }
             restoredDraft = entry.text
         } catch {
             errorMessage = error.localizedDescription
@@ -804,9 +864,17 @@ final class ChatModel {
                 apply(event)
             }
 
+        case let .conversation(eventSession, event):
+            guard eventSession == sessionID else { return }
+            if activeReloads > 0 {
+                bufferedConversation.append(event)
+            } else {
+                apply(event)
+            }
+
         case let .event(event):
             guard event.sessionID == nil || event.sessionID == sessionID else { return }
-            if event.type.contains("approval") || event.type.contains("question")
+            if event.type == "session" || event.type.contains("approval") || event.type.contains("question")
                 || event.type.contains("interaction") || event.type == "event.session.work_changed" {
                 scheduleInteractionRefresh()
             }
@@ -871,11 +939,33 @@ final class ChatModel {
         }
     }
 
+    private func apply(_ event: ConversationWireEvent) {
+        if conversation == nil, detectedWireProtocol == .conversation {
+            conversation = ConversationState()
+        }
+        guard conversation != nil else { return }
+        switch event {
+        case let .failed(code, message):
+            errorMessage = "对话加载失败（\(code)）：\(message)"
+        case let .notice(level, title, detail) where level == "error":
+            errorMessage = detail.map { "\(title)：\($0)" } ?? title
+        default:
+            break
+        }
+        conversation?.apply(event)
+        transcript = conversation?.transcriptState ?? transcript
+        rebuild()
+    }
+
     private func scheduleTranscriptReload(after delay: Duration = .milliseconds(300)) {
         transcriptReload.schedule(after: delay) { [weak self] in
             await self?.reload()
             guard let self, let sessionID = self.sessionID else { return }
-            await self.stream?.subscribeTranscript(sessionID, since: self.transcript.seq)
+            if self.conversation == nil {
+                await self.stream?.subscribeTranscript(sessionID, since: self.transcript.seq)
+            } else {
+                await self.stream?.subscribe(to: sessionID)
+            }
         }
     }
 }

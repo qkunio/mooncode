@@ -25,6 +25,10 @@ struct KapClient: Sendable {
         try await get("meta")
     }
 
+    func serverMeta() async throws -> ServerMeta? {
+        try await meta()
+    }
+
     // MARK: 会话
 
     func sessions(pageSize: Int = 100) async throws -> SessionList {
@@ -231,20 +235,26 @@ struct KapClient: Sendable {
         try await get("sessions/\(sessionID)/status")
     }
 
-    /// 改会话的模型 / 思考强度 / 权限模式。
+    /// 改会话的模型 / 思考强度 / 权限模式。2.7+ 返回 `{ session, agent }`，旧版返回扁平 `SessionSummary`。
     @discardableResult
     func updateProfile(_ sessionID: String, agentConfig: AgentConfigPatch) async throws -> SessionSummary {
         struct Body: Encodable {
             let agentConfig: AgentConfigPatch
             enum CodingKeys: String, CodingKey { case agentConfig = "agent_config" }
         }
-        return try await post("sessions/\(sessionID)/profile", body: Body(agentConfig: agentConfig))
+        let response: SessionProfileResponse = try await post(
+            "sessions/\(sessionID)/profile", body: Body(agentConfig: agentConfig)
+        )
+        return response.session
     }
 
     /// 重命名（网页端 `updateSession({title})`：`POST /sessions/{id}/profile {title}`）。
     func renameSession(_ sessionID: String, title: String) async throws -> SessionSummary {
         struct Body: Encodable { let title: String }
-        return try await post("sessions/\(sessionID)/profile", body: Body(title: title))
+        let response: SessionProfileResponse = try await post(
+            "sessions/\(sessionID)/profile", body: Body(title: title)
+        )
+        return response.session
     }
 
     /// 永久删除会话（网页端 `deleteSession`：`POST /sessions/{id}:delete`）。
@@ -253,17 +263,47 @@ struct KapClient: Sendable {
         let _: JSONValue = try await post("sessions/\(sessionID):delete", body: Empty())
     }
 
-    /// 对话正文（与网页端 `getSessionTranscript` 一致，按轮分页，`page_size` 上限 100）。
     func transcript(_ sessionID: String, pageSize: Int = 30, beforeTurn: String? = nil) async throws -> TranscriptPage {
+        try await transcript(sessionID, pageSize: pageSize, beforeTurn: beforeTurn, beforeOrdinal: nil)
+    }
+
+    /// 2.6+ 使用 turns；旧版只在确认新路由不存在后回退 transcript。
+    func transcript(
+        _ sessionID: String, pageSize: Int, beforeTurn: String?, beforeOrdinal: Int?
+    ) async throws -> TranscriptPage {
+        do {
+            var query = ["page_size": String(pageSize)]
+            if let beforeOrdinal { query["before_ordinal"] = String(beforeOrdinal) }
+            let page: ConversationPage = try await get("sessions/\(sessionID)/agents/main/turns", query: query)
+            return TranscriptPage(conversation: page)
+        } catch KapError.http(status: 404, body: _) {
+        } catch let KapError.api(code, _) where code == KapErrorCode.notFound {
+        }
+
         var query = ["agent_id": "main", "page_size": String(pageSize)]
         if let beforeTurn { query["before_turn"] = beforeTurn }
         return try await get("sessions/\(sessionID)/transcript", query: query)
     }
 
-    /// 撤销最近 `count` 条用户消息及其后的内容（网页端 `undoSession`）。
+    /// 撤销最近 `count` 条用户消息及其后的内容（旧版网页端 `undoSession`）。
     func undo(_ sessionID: String, count: Int) async throws {
         struct Body: Encodable { let count: Int }
         let _: JSONValue = try await post("sessions/\(sessionID):undo", body: Body(count: count))
+    }
+
+    /// 2.6+ 按 opener 所在 turn 撤销。
+    func undo(_ sessionID: String, turnID: String) async throws {
+        struct Body: Encodable {
+            let turnID: String
+            let agentID: String
+            enum CodingKeys: String, CodingKey {
+                case turnID = "turn_id"
+                case agentID = "agent_id"
+            }
+        }
+        let _: JSONValue = try await post(
+            "sessions/\(sessionID):undo", body: Body(turnID: turnID, agentID: "main")
+        )
     }
 
     /// 在某个工作区里新建会话。与网页端 `createSession` 同形：`{ metadata:{cwd}, workspace_id, agent_config }`。
@@ -318,7 +358,7 @@ struct KapClient: Sendable {
         }
         request.timeoutInterval = 60
         let (responseData, response) = try await session.upload(for: request, from: body)
-        return try decodeEnvelope(responseData, status: (response as? HTTPURLResponse)?.statusCode ?? 0, path: "files")
+        return try Self.decodeEnvelope(responseData, status: (response as? HTTPURLResponse)?.statusCode ?? 0, path: "files")
     }
 
     /// 读取图片；会话媒体和上传文件需要当前登录凭证，外部地址不携带 Kimi 凭证。
@@ -373,13 +413,24 @@ struct KapClient: Sendable {
         return data
     }
 
-    /// 停止当前 turn（网页端的停止按钮走的就是它）。
+    /// 停止当前 turn：2.7+ 使用 `:cancel`，旧版在确认不支持该 action 后回退 `:abort`。
     func abort(_ sessionID: String) async throws {
         struct Empty: Encodable {}
+        do {
+            let _: JSONValue = try await post("sessions/\(sessionID):cancel", body: Empty())
+            return
+        } catch KapError.http(status: 404, body: _) {
+        } catch let KapError.api(code, _) where code == KapErrorCode.validationFailed || code == KapErrorCode.notFound {
+        }
         let _: JSONValue = try await post("sessions/\(sessionID):abort", body: Empty())
     }
 
     // MARK: 权限确认
+
+    /// 2.7+ 统一的 pending interactions（含 approval 与 question）。
+    func pendingInteractions(_ sessionID: String) async throws -> PendingInteractionList {
+        try await get("sessions/\(sessionID)/interactions")
+    }
 
     func pendingApprovals(_ sessionID: String) async throws -> ApprovalList {
         try await get("sessions/\(sessionID)/approvals", query: ["status": "pending"])
@@ -498,10 +549,10 @@ struct KapClient: Sendable {
         }
 
         let (data, response) = try await session.data(for: request)
-        return try decodeEnvelope(data, status: (response as? HTTPURLResponse)?.statusCode ?? 0, path: path)
+        return try Self.decodeEnvelope(data, status: (response as? HTTPURLResponse)?.statusCode ?? 0, path: path)
     }
 
-    private func decodeEnvelope<Response: Decodable>(_ data: Data, status: Int, path: String) throws -> Response {
+    static func decodeEnvelope<Response: Decodable>(_ data: Data, status: Int, path: String) throws -> Response {
         guard (200 ..< 300).contains(status) else {
             // relay 的错误不是信封格式（`{"error":{"message":…}}`），原样带上去。
             throw KapError.http(status: status, body: String(data: data, encoding: .utf8) ?? "")
@@ -511,15 +562,23 @@ struct KapClient: Sendable {
         do {
             envelope = try JSONDecoder().decode(Envelope<Response>.self, from: data)
         } catch {
-            if let error = try? JSONDecoder().decode(ErrorEnvelope.self, from: data) {
+            if let error = try? JSONDecoder().decode(ErrorEnvelope.self, from: data),
+               error.code != KapErrorCode.ok {
                 throw KapError.api(code: error.code, message: error.msg)
             }
             Self.logger.error("解码 \(path) 失败：\(error)")
             throw KapError.decoding(underlying: error, context: path)
         }
 
-        guard envelope.code == KapErrorCode.ok, let payload = envelope.data else {
+        guard envelope.code == KapErrorCode.ok else {
             throw KapError.api(code: envelope.code, message: envelope.msg)
+        }
+        guard let payload = envelope.data else {
+            let error = DecodingError.dataCorrupted(.init(
+                codingPath: [], debugDescription: "成功响应缺少 data"
+            ))
+            Self.logger.error("解码 \(path) 失败：\(error)")
+            throw KapError.decoding(underlying: error, context: path)
         }
         return payload
     }

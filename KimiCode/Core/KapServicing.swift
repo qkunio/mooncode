@@ -3,6 +3,7 @@ import Foundation
 /// 会话后端。登录后真机走 `KapClient`（relay → 电脑）；体验模式走 `DemoClient`（纯内存，不连任何服务器）。
 protocol KapServicing: Sendable {
     // 侧栏 / 元信息
+    func serverMeta() async throws -> ServerMeta?
     func workspaces() async throws -> [Workspace]
     func addWorkspace(root: String) async throws -> Workspace
     func browseFs(_ path: String) async throws -> FsBrowse
@@ -38,7 +39,11 @@ protocol KapServicing: Sendable {
     func renameSession(_ sessionID: String, title: String) async throws -> SessionSummary
     func deleteSession(_ sessionID: String) async throws
     func transcript(_ sessionID: String, pageSize: Int, beforeTurn: String?) async throws -> TranscriptPage
+    func transcript(
+        _ sessionID: String, pageSize: Int, beforeTurn: String?, beforeOrdinal: Int?
+    ) async throws -> TranscriptPage
     func undo(_ sessionID: String, count: Int) async throws
+    func undo(_ sessionID: String, turnID: String) async throws
     func createSession(in workspace: Workspace, agentConfig: AgentConfigPatch) async throws -> SessionSummary
 
     // 发任务 / 打断
@@ -48,6 +53,8 @@ protocol KapServicing: Sendable {
     func abort(_ sessionID: String) async throws
 
     // 权限确认 / 提问
+    /// 2.7+ 统一的 pending interactions 列表。旧版与体验模式默认抛出 404 走旧接口或 WS 帧。
+    func pendingInteractions(_ sessionID: String) async throws -> PendingInteractionList
     func pendingApprovals(_ sessionID: String) async throws -> ApprovalList
     func resolve(approval approvalID: String, in sessionID: String, with decision: ApprovalDecisionBody) async throws -> Bool
     func pendingQuestions(_ sessionID: String) async throws -> QuestionList
@@ -62,6 +69,12 @@ protocol KapServicing: Sendable {
 extension KapClient: KapServicing {}
 
 extension KapServicing {
+    func serverMeta() async throws -> ServerMeta? { nil }
+
+    func pendingInteractions(_: String) async throws -> PendingInteractionList {
+        throw KapError.http(status: 404, body: "")
+    }
+
     func attachmentData(_ source: AttachmentSource, sessionID: String) async throws -> Data {
         throw KapError.api(code: -1, message: "图片暂时无法预览。")
     }
@@ -76,6 +89,16 @@ extension KapServicing {
 
     func transcript(_ sessionID: String, beforeTurn: String?) async throws -> TranscriptPage {
         try await transcript(sessionID, pageSize: 30, beforeTurn: beforeTurn)
+    }
+
+    func transcript(
+        _ sessionID: String, pageSize: Int, beforeTurn: String?, beforeOrdinal _: Int?
+    ) async throws -> TranscriptPage {
+        try await transcript(sessionID, pageSize: pageSize, beforeTurn: beforeTurn)
+    }
+
+    func undo(_ sessionID: String, turnID _: String) async throws {
+        try await undo(sessionID, count: 1)
     }
 
     func resolveInteraction(approval approvalID: String, in sessionID: String, with decision: ApprovalDecisionBody) async throws -> Bool {

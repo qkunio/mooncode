@@ -48,8 +48,11 @@ enum KapErrorCode {
     static let fileTooLarge = 41302
     static let filePathEscapesWorkspace = 41304
     static let approvalNotFound = 40404
+    static let sessionBusy = 40901
     static let approvalAlreadyResolved = 40902
     static let remoteControlAlreadyRunning = 40903
+    static let sessionLocked = 40931
+    static let interactionExpired = 41001
     static let internalError = 50000
 }
 
@@ -81,6 +84,8 @@ enum KapError: LocalizedError {
                 return "电脑上找不到这个模型的配置，可能已被删除。请换一个模型。\n\(message)"
             case KapErrorCode.filePathEscapesWorkspace:
                 return "无法访问此文件：路径超出当前工作区，或符号链接指向工作区外。请选择工作区内的文件。"
+            case KapErrorCode.sessionLocked:
+                return "此会话正在被电脑上的另一个进程占用，请关闭对应窗口后再试。"
             default:
                 if message.localizedCaseInsensitiveContains("not connected") { return "当前设备已离线。" }
                 return "\(message)（code \(code)）"

@@ -2,10 +2,11 @@ import Foundation
 
 // MARK: - Transcript 模型
 //
-// 与官方网页端一致：对话正文走 transcript 通道，而不是 `/history`。
+// 旧版对话正文走 transcript 通道，而不是 `/history`。
 //   - 首屏 `GET /sessions/{id}/transcript?agent_id=main&page_size=N`（按轮分页）
 //   - 之后 WS `subscribe_v2 {transcript:{main:"delta"}, transcript_since}` 推 `transcript.reset/ops`
 //   - 本地按 `packages/transcript/src/ops/apply.ts` 的语义应用增量（逐字流式）
+// 2.6+ 的 turns / items 由 Conversation.swift 适配成这里的统一视图模型。
 //
 // 线上格式：外层是 snake_case（`agent_id`/`has_more`），items/ops 里面是 camelCase。
 // 字段大多可选 —— 没见过的 frame/op 类型原样忽略，不让整条流断。
@@ -119,10 +120,11 @@ struct TranscriptTurn: Decodable, Sendable, Equatable {
     var model: String?
     var durationMs: Double?
     var error: String?
+    var endReason: String?
 
     enum CodingKeys: String, CodingKey {
         case turnId, triggerPromptId, ordinal, state, origin, prompt, attachmentIds, steps
-        case startedAt, endedAt, usage, model, durationMs, error
+        case startedAt, endedAt, usage, model, durationMs, error, endReason
     }
 
     init(skeleton turnId: String) {
@@ -148,6 +150,7 @@ struct TranscriptTurn: Decodable, Sendable, Equatable {
         model = try? c.decodeIfPresent(String.self, forKey: .model)
         durationMs = try? c.decodeIfPresent(Double.self, forKey: .durationMs)
         error = try? c.decodeIfPresent(String.self, forKey: .error)
+        endReason = try? c.decodeIfPresent(String.self, forKey: .endReason)
     }
 
     /// turnId 形如 `t_12` / `12`，取末尾数字当序号（与 `turnOrdinal` 一致）。
@@ -369,7 +372,12 @@ struct TranscriptSnapshot: Decodable, Sendable {
     }
 }
 
-/// `GET /sessions/{id}/transcript` 的响应（外层 snake_case）。
+enum TranscriptProtocol: Sendable, Equatable {
+    case legacy
+    case conversation
+}
+
+/// 旧版 transcript 或 2.6+ turns 转换后的统一页面。
 struct TranscriptPage: Decodable, Sendable {
     var items: [TranscriptItem]
     var tasks: [TranscriptTask]
@@ -379,13 +387,30 @@ struct TranscriptPage: Decodable, Sendable {
     var meta: JSONValue?
     var hasMore: Bool
     var seq: Int?
+    var wireProtocol: TranscriptProtocol
+    var conversation: ConversationPage?
 
     enum CodingKeys: String, CodingKey {
         case items, tasks, interactions, attachments, prompts, meta, seq
         case hasMore = "has_more"
     }
 
+    init() {
+        items = []
+        tasks = []
+        interactions = []
+        attachments = []
+        prompts = []
+        hasMore = false
+        wireProtocol = .legacy
+    }
+
+    init(conversation: ConversationPage) {
+        self = ConversationState(page: conversation).transcriptPage
+    }
+
     init(from decoder: any Decoder) throws {
+        self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         items = (try? c.decodeIfPresent([Lossy<TranscriptItem>].self, forKey: .items))?.compactMap(\.value) ?? []
         tasks = (try? c.decodeIfPresent([Lossy<TranscriptTask>].self, forKey: .tasks))?.compactMap(\.value) ?? []

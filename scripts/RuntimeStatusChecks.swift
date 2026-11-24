@@ -1,6 +1,6 @@
 import Foundation
 
-// swiftc KimiCode/Core/{Models,JSONValue,Endpoint,RuntimeFrames,Transcript}.swift scripts/RuntimeStatusChecks.swift -o /tmp/runtime-status-checks
+// swiftc KimiCode/Core/{Models,JSONValue,Endpoint,RuntimeFrames,Transcript,Conversation}.swift scripts/RuntimeStatusChecks.swift -o /tmp/runtime-status-checks
 @main struct RuntimeStatusChecks {
     static func decode<T: Decodable>(_ type: T.Type = T.self, from json: String) throws -> T {
         try JSONDecoder().decode(T.self, from: Data(json.utf8))
@@ -98,6 +98,89 @@ import Foundation
         let permissionPatch = try object(ServerConfigPatch(defaultPermissionMode: .yolo))
         precondition(permissionPatch.count == 1 && permissionPatch["default_permission_mode"] as? String == "yolo")
 
-        print("PASS: legacy status, strict agent/usage, running state, interaction frames, response bodies and default config patches")
+        let conversationJSON = #"{"turns":[{"turn_id":"turn-1","ordinal":1,"kind":"agent","status":"running","started_at":"2026-11-13T01:00:00Z","steps":[{"index":1,"outcome":"completed","started_at":"2026-11-13T01:00:00Z","ended_at":"2026-11-13T01:00:01Z","usage":{"input_other":10,"output":4,"input_cache_read":6,"input_cache_creation":2}}],"items":[{"type":"user_message","item_id":"u1","status":"ended","outcome":"completed","created_at":"2026-11-13T01:00:00Z","prompt_ids":["p1"],"placement":"opener","origin":{"kind":"user"},"text":"Hello","attachments":[{"kind":"image","file_id":"f1","name":"photo.jpg","media_type":"image/jpeg","ordinal":1}],"skills":[]},{"type":"reasoning","item_id":"r1","step_index":1,"status":"ended","outcome":"completed","created_at":"2026-11-13T01:00:00Z","text":"Think","started_at":"2026-11-13T01:00:00Z"},{"type":"tool_call","item_id":"call1","step_index":1,"status":"running","created_at":"2026-11-13T01:00:00Z","name":"Bash","stage":"executing","input":{"command":"pwd"},"started_at":"2026-11-13T01:00:00Z"},{"type":"assistant_message","item_id":"a1","step_index":1,"status":"running","created_at":"2026-11-13T01:00:00Z","text":"Hel"}]}],"has_more":true}"#
+        let conversationPage = try decode(ConversationPage.self, from: conversationJSON)
+        let unified = TranscriptPage(conversation: conversationPage)
+        precondition(unified.wireProtocol == .conversation && unified.hasMore && unified.conversation != nil)
+        guard case let .turn(unifiedTurn)? = unified.items.first else {
+            preconditionFailure("Expected a projected turn")
+        }
+        precondition(unifiedTurn.prompt == "Hello" && unifiedTurn.triggerPromptId == "p1")
+        precondition(unifiedTurn.attachmentIds?.count == 1 && unified.attachments.count == 1)
+        precondition(unified.attachments[0].source?["kind"]?.stringValue == "session_media")
+        precondition(unifiedTurn.steps[0].usage?.output == 4)
+        precondition(unifiedTurn.steps[0].frames.count == 3)
+        precondition(unified.prompts[0].promptId == "p1" && unified.prompts[0].userMessageId == "u1")
+
+        var conversation = ConversationState(page: conversationPage)
+        let delta = try decode(ConversationWireEvent.self, from: #"{"type":"item.delta","session_id":"s1","agent_id":"main","event_created_at":"2026-11-13T01:00:02Z","turn_id":"turn-1","item_id":"a1","field":"text","delta":"lo"}"#)
+        conversation.apply(delta)
+        let deltaTurn = conversation.transcriptState.turns[0]
+        precondition(deltaTurn.steps[0].frames.last?.text == "Hello")
+        precondition(deltaTurn.prompt == "Hello")
+
+        let toolUpdate = try decode(ConversationWireEvent.self, from: #"{"type":"item.updated","session_id":"s1","agent_id":"main","event_created_at":"2026-11-13T01:00:03Z","turn_id":"turn-1","item_id":"call1","set":{"status":"ended","outcome":"completed","output":"done","ended_at":"2026-11-13T01:00:03Z"}}"#)
+        conversation.apply(toolUpdate)
+        let updatedTool = conversation.transcriptState.turns[0].steps[0].frames.first { $0.frameId == "call1" }
+        precondition(updatedTool?.state == "completed" && updatedTool?.output?.stringValue == "done")
+
+        let retryEvent = try decode(ConversationWireEvent.self, from: #"{"type":"turn.updated","session_id":"s1","agent_id":"main","event_created_at":"2026-11-13T01:00:04Z","turn_id":"turn-1","retry":{"attempt":1,"next_attempt":2,"max_attempts":3,"delay_ms":250,"error":{"name":"Network","message":"offline","status_code":503}}}"#)
+        conversation.apply(retryEvent)
+        precondition(conversation.transcriptState.turns[0].steps.last?.retry?.nextAttempt == 2)
+        let retryCleared = try decode(ConversationWireEvent.self, from: #"{"type":"turn.updated","session_id":"s1","agent_id":"main","event_created_at":"2026-11-13T01:00:05Z","turn_id":"turn-1"}"#)
+        conversation.apply(retryCleared)
+        precondition(conversation.transcriptState.turns[0].steps.last?.retry == nil)
+
+        let ended = try decode(ConversationWireEvent.self, from: #"{"type":"turn.ended","session_id":"s1","agent_id":"main","event_created_at":"2026-11-13T01:00:06Z","turn":{"turn_id":"turn-1","ordinal":1,"kind":"agent","status":"ended","outcome":"completed","started_at":"2026-11-13T01:00:00Z","ended_at":"2026-11-13T01:00:06Z","duration_ms":6000,"steps":[]}}"#)
+        conversation.apply(ended)
+        let endedState = conversation.transcriptState
+        precondition(endedState.turns[0].state == "completed" && !endedState.isTurnActive)
+        precondition(endedState.turns[0].steps[0].frames.last?.text == "Hello")
+        conversation.apply(try decode(ConversationWireEvent.self, from: #"{"type":"turns.removed","session_id":"s1","agent_id":"main","event_created_at":"2026-11-13T01:00:07Z","turn_ids":["turn-1"]}"#))
+        precondition(conversation.transcriptState.turns.isEmpty)
+
+        let notification = try decode(ConversationItem.self, from: #"{"type":"notification","item_id":"n1","status":"ended","outcome":"completed","created_at":"2026-11-13T01:00:08Z","notification_id":"notice1","title":"Background task","body":"Finished","severity":"info","notification_type":"task","source":{"kind":"task","id":"task1"},"output":{"file":"result.txt","preview":"done","bytes":4,"truncated":false}}"#)
+        precondition(notification.output?["file"]?.stringValue == "result.txt")
+        precondition(notification.output?["bytes"]?.intValue == 4)
+        let objectOutputUpdate = try decode(ConversationItemPatch.self, from: #"{"output":{"preview":"updated"}}"#)
+        precondition(objectOutputUpdate.output?["preview"]?.stringValue == "updated")
+
+        // 2.7 / KAP 1.0.0 checks
+        let meta27 = try decode(ServerMeta.self, from: #"{"kimi_agent_protocol_version":"1.0.0","server_version":"2.7.2","product":"kimi-code-desktop","server_id":"srv1","dangerous_bypass_auth":false,"capabilities":{"websocket":true,"file_upload":true,"fs_query":true,"mcp":true,"tasks":true,"interactions_list":true,"session_wait":true}}"#)
+        precondition(meta27.usesConversationProtocol && meta27.capabilities?.interactionsList == true && meta27.capabilities?.terminal == false)
+        let meta25 = try decode(ServerMeta.self, from: #"{"server_version":"2.5.2","capabilities":{"websocket":true,"terminal":true}}"#)
+        precondition(!meta25.usesConversationProtocol && meta25.capabilities?.terminal == true)
+
+        let session27Turn = try decode(SessionSummary.self, from: #"{"id":"s27","workspace_id":"wm_1","cwd":"/tmp/my-repo","title":"","created_at":"2026-11-20T01:00:00Z","updated_at":"2026-11-20T01:05:00Z","activity":"turn","last_turn_outcome":"interrupted","metadata":{"custom":true}}"#)
+        precondition(session27Turn.busy && session27Turn.mainTurnActive == true)
+        precondition(session27Turn.pendingInteraction == .none)
+        precondition(session27Turn.resolvedCWD == "/tmp/my-repo" && session27Turn.folderName == "my-repo" && session27Turn.displayTitle == "my-repo")
+        precondition(session27Turn.lastTurnReason == "interrupted")
+
+        let session27Idle = try decode(SessionSummary.self, from: #"{"id":"s27-idle","workspace_id":"wm_1","cwd":"/tmp/idle","title":"Done","created_at":"2026-11-20T01:00:00Z","updated_at":"2026-11-20T01:05:00Z","activity":"idle"}"#)
+        precondition(!session27Idle.busy && session27Idle.mainTurnActive == false && session27Idle.displayTitle == "Done")
+
+        let session27Bg = try decode(SessionSummary.self, from: #"{"id":"s27-bg","workspace_id":"wm_1","cwd":"/tmp/bg","title":"Bg","created_at":"2026-11-20T01:00:00Z","updated_at":"2026-11-20T01:05:00Z","activity":"background","pending_interaction":"approval"}"#)
+        precondition(session27Bg.busy && session27Bg.mainTurnActive == false && session27Bg.pendingInteraction == .approval)
+
+        let wrappedProfile = try decode(SessionProfileResponse.self, from: #"{"session":{"id":"s27","workspace_id":"wm_1","cwd":"/tmp/my-repo","title":"Renamed","created_at":"2026-11-20T01:00:00Z","updated_at":"2026-11-20T01:05:00Z","activity":"idle"},"agent":{"status":"idle","compacting":false,"model":"kimi-code/k3","thinking":"high","permission_mode":"auto","plan_mode":false,"swarm_mode":false,"tower_mode":false}}"#)
+        precondition(wrappedProfile.session.title == "Renamed" && wrappedProfile.agent?.model == "kimi-code/k3")
+
+        let legacyProfile = try decode(SessionProfileResponse.self, from: #"{"id":"s25","workspace_id":"w1","title":"Legacy","busy":false,"pending_interaction":"none","metadata":{"cwd":"/tmp/legacy"}}"#)
+        precondition(legacyProfile.session.title == "Legacy" && legacyProfile.session.folderName == "legacy" && legacyProfile.agent == nil)
+
+        let endedAgent = try decode(SessionAgentState.self, from: #"{"type":"agent","session_id":"s1","agent_id":"main","status":"ended","compacting":false,"plan_mode":false,"swarm_mode":false,"tower_mode":false}"#)
+        precondition(!endedAgent.isWorking && !endedAgent.isCompacting)
+        let compactingAgent27 = try decode(SessionAgentState.self, from: #"{"type":"agent","session_id":"s1","agent_id":"main","status":"idle","compacting":true,"plan_mode":false,"swarm_mode":false,"tower_mode":false}"#)
+        precondition(compactingAgent27.isWorking && compactingAgent27.isCompacting)
+        let compactingAgent25 = try decode(SessionAgentState.self, from: #"{"type":"agent","session_id":"s1","agent_id":"main","status":"compacting","plan_mode":false,"swarm_mode":false,"tower_mode":false}"#)
+        precondition(compactingAgent25.isWorking && compactingAgent25.isCompacting)
+
+        let pendingList = try decode(PendingInteractionList.self, from: #"{"items":[{"interaction_id":"a27","session_id":"s27","agent_id":"main","created_at":"2026-11-20T01:00:00Z","tool_call_id":"call1","kind":"approval","request":{"tool_name":"Bash","action":"command","tool_input_display":{"command":"ls"},"expires_at":"2026-11-21T01:00:00Z"}},{"interaction_id":"q27","session_id":"s27","agent_id":"main","created_at":"2026-11-20T01:00:00Z","kind":"question","request":{"questions":[{"id":"q0","question":"Proceed?","options":[{"id":"y","label":"Yes"},{"id":"n","label":"No"}]}]}}]}"#)
+        precondition(pendingList.approvals.count == 1 && pendingList.approvals[0].approvalID == "a27")
+        precondition(pendingList.questions.count == 1 && pendingList.questions[0].questionID == "q27")
+        precondition(ProviderWireType(rawValue: "bedrock") == .bedrock)
+
+        print("PASS: legacy status, 2.6 pages/streaming/attachments/object outputs, 2.7/KAP 1.0.0, interactions and config patches")
     }
 }

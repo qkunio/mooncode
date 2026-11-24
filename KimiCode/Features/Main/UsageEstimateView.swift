@@ -9,11 +9,11 @@ struct UsageEstimateView: View {
     @State private var planUsage: PlanUsage?
     @State private var planError: String?
     @State private var fiveHourReport: DeviceTokenUsageReport?
-    @State private var isLoadingFiveHour = false
+    @State private var isLoadingFiveHour = true
     @State private var fiveHourError: String?
     @State private var fiveHourProgress: DeviceUsageProgress?
     @State private var weeklyReport: DeviceTokenUsageReport?
-    @State private var isLoadingWeekly = false
+    @State private var isLoadingWeekly = true
     @State private var weeklyError: String?
     @State private var weeklyProgress: DeviceUsageProgress?
     @State private var fiveHourRange: TokenUsageTimeRange?
@@ -165,6 +165,10 @@ struct UsageEstimateView: View {
     }
 
     private func loadDashboard() async {
+        isLoadingFiveHour = true
+        isLoadingWeekly = true
+        fiveHourProgress = nil
+        weeklyProgress = nil
         await loadPlan()
         await loadTokenReports()
     }

@@ -251,9 +251,12 @@ struct DeviceUsageLoader: Sendable {
         var records: [String: TokenUsageRecord] = [:]
         var cursors: Set<String> = []
         var beforeTurn: String?
+        var beforeOrdinal: Int?
         while true {
             try Task.checkCancellation()
-            let page = try await client.transcript(session.id, pageSize: 30, beforeTurn: beforeTurn)
+            let page = try await client.transcript(
+                session.id, pageSize: 30, beforeTurn: beforeTurn, beforeOrdinal: beforeOrdinal
+            )
             let turns = page.items.compactMap { item -> TranscriptTurn? in
                 guard case let .turn(turn) = item else { return nil }
                 return turn
@@ -272,13 +275,15 @@ struct DeviceUsageLoader: Sendable {
                 guard let date = Self.date(turn.endedAt ?? turn.startedAt) else { return false }
                 return date < coverage.start
             }
-            guard page.hasMore, !reachedOlderTurns, let next = turns.first?.turnId, !next.isEmpty else {
+            guard page.hasMore, !reachedOlderTurns, let first = turns.first, !first.turnId.isEmpty else {
                 return records.values.sorted { $0.date < $1.date }
             }
+            let next = first.turnId
             guard next != beforeTurn, cursors.insert(next).inserted else {
                 throw KapError.api(code: -1, message: "对话分页游标重复，无法完成 Token 统计。")
             }
             beforeTurn = next
+            beforeOrdinal = first.ordinal
         }
     }
 

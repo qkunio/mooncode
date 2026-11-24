@@ -3,6 +3,7 @@ import Foundation
 /// Kimi Code 2.5+ 的全量 agent 状态。缺省字段表示服务端当前没有该值，不是“保持原值”。
 struct SessionAgentState: Decodable, Sendable {
     let status: String
+    let compacting: Bool
     let model: String?
     let thinkingLevel: String?
     let permission: PermissionMode?
@@ -10,13 +11,35 @@ struct SessionAgentState: Decodable, Sendable {
     let swarmMode: Bool
     let towerMode: Bool
 
+    /// 2.7+ 的 status 为 `idle | running | ended`，同时用独立布尔 `compacting` 表达压缩中；
+    /// 2.5–2.6 则用 `status == "compacting"`。`idle` 和 `ended` 都属于非运行态。
+    var isWorking: Bool {
+        compacting || (status != "idle" && status != "ended")
+    }
+
+    var isCompacting: Bool {
+        compacting || status == "compacting"
+    }
+
     enum CodingKeys: String, CodingKey {
-        case status, model
+        case status, compacting, model
         case thinkingLevel = "thinking"
         case permission = "permission_mode"
         case planMode = "plan_mode"
         case swarmMode = "swarm_mode"
         case towerMode = "tower_mode"
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        status = try c.decode(String.self, forKey: .status)
+        compacting = (try? c.decodeIfPresent(Bool.self, forKey: .compacting)) ?? false
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        thinkingLevel = try c.decodeIfPresent(String.self, forKey: .thinkingLevel)
+        permission = try? c.decodeIfPresent(PermissionMode.self, forKey: .permission)
+        planMode = try c.decode(Bool.self, forKey: .planMode)
+        swarmMode = try c.decode(Bool.self, forKey: .swarmMode)
+        towerMode = try c.decode(Bool.self, forKey: .towerMode)
     }
 }
 
@@ -201,4 +224,75 @@ struct InteractionOutcome: Decodable, Sendable {
         case outcome
         case endedAt = "ended_at"
     }
+}
+
+/// 2.7+ `GET /sessions/{id}/interactions` 的单项：结构同 pending 的 `InteractionFrame`，但时间键为 `created_at` 且无 `type` / `status`。
+struct PendingInteractionItem: Decodable, Sendable {
+    let interactionID: String
+    let sessionID: String
+    let agentID: String
+    let createdAt: FlexibleDate
+    let toolCallID: String?
+    let kind: InteractionFrame.Kind
+    let approval: InteractionFrame.ApprovalPayload?
+    let questions: [QuestionRequest.Question]?
+
+    enum CodingKeys: String, CodingKey {
+        case kind, request
+        case interactionID = "interaction_id"
+        case sessionID = "session_id"
+        case agentID = "agent_id"
+        case createdAt = "created_at"
+        case toolCallID = "tool_call_id"
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        interactionID = try c.decode(String.self, forKey: .interactionID)
+        sessionID = try c.decode(String.self, forKey: .sessionID)
+        agentID = try c.decode(String.self, forKey: .agentID)
+        createdAt = try c.decode(FlexibleDate.self, forKey: .createdAt)
+        toolCallID = try c.decodeIfPresent(String.self, forKey: .toolCallID)
+        kind = try c.decode(InteractionFrame.Kind.self, forKey: .kind)
+        switch kind {
+        case .approval:
+            approval = try c.decode(InteractionFrame.ApprovalPayload.self, forKey: .request)
+            questions = nil
+        case .question:
+            approval = nil
+            questions = try c.decode(InteractionFrame.QuestionPayload.self, forKey: .request).questions
+        }
+    }
+
+    var approvalRequest: ApprovalRequest? {
+        guard kind == .approval, let approval else { return nil }
+        return ApprovalRequest(
+            approvalID: interactionID,
+            sessionID: sessionID,
+            turnID: nil,
+            toolCallID: toolCallID ?? "",
+            toolName: approval.toolName,
+            action: approval.action,
+            toolInputDisplay: approval.toolInputDisplay,
+            createdAt: createdAt,
+            expiresAt: approval.expiresAt
+        )
+    }
+
+    var questionRequest: QuestionRequest? {
+        guard kind == .question, let questions else { return nil }
+        return QuestionRequest(
+            questionID: interactionID,
+            sessionID: sessionID,
+            toolCallID: toolCallID,
+            questions: questions
+        )
+    }
+}
+
+struct PendingInteractionList: Decodable, Sendable {
+    let items: [PendingInteractionItem]
+
+    var approvals: [ApprovalRequest] { items.compactMap(\.approvalRequest) }
+    var questions: [QuestionRequest] { items.compactMap(\.questionRequest) }
 }

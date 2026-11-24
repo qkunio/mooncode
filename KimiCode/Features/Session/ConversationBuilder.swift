@@ -30,6 +30,8 @@ struct UserEntry: Sendable {
     let createdAt: Date?
     /// 可撤销的条数（官方 `zIe`：从末尾往前数用户消息，遇到压缩分隔就停）。
     var undoCount: Int?
+    /// 2.6+ 撤销接口使用的 opener turn id。
+    var undoTurnID: String? = nil
 }
 
 struct AttachmentRef: Identifiable, Sendable, Hashable {
@@ -340,7 +342,8 @@ enum ConversationBuilder {
                         id: "\(turn.turnId):input",
                         text: split.text,
                         attachments: split.mentions + attachments,
-                        createdAt: turnStart
+                        createdAt: turnStart,
+                        undoTurnID: turn.turnId
                     ))))
                 }
             }
@@ -384,6 +387,7 @@ enum ConversationBuilder {
                         let status: ToolItem.Status = switch frame.state {
                         case "error": .error
                         case "running": .running
+                        case "cancelled": .cancelled
                         default: .ok
                         }
                         let rawOutput = frame.state == "error" ? (frame.output ?? frame.error.map(JSONValue.string)) : frame.output
@@ -395,6 +399,15 @@ enum ConversationBuilder {
                             status: status,
                             display: frame.display
                         )))
+
+                    case "notice":
+                        ensureAssistant(frame.frameId, turn: turn, createdAt: stepStart)
+                        current?.blocks.append(.notification(
+                            id: frame.frameId,
+                            title: frame.name ?? "",
+                            body: frame.message ?? frame.text ?? "",
+                            failed: frame.level == "error"
+                        ))
 
                     default:
                         continue
@@ -450,7 +463,7 @@ enum ConversationBuilder {
     /// 官方 `d_e`：只有用户本人发的（或斜杠触发的技能）才画成用户气泡。
     static func isUserVisible(_ kind: String?) -> Bool {
         switch kind {
-        case nil, "user", "skill_activation", "plugin_command": true
+        case nil, "user", "skill", "skill_activation", "plugin_command": true
         default: false
         }
     }

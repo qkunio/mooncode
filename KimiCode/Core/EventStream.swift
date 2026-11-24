@@ -4,6 +4,7 @@ import OSLog
 /// 服务端推来的事件信封。`payload` 是刻意不定型的联合体，保留原始 JSON。
 struct SessionEventFrame: Decodable, Sendable {
     let type: String
+    let change: String?
     let seq: Int?
     let epoch: String?
     let volatile: Bool?
@@ -11,8 +12,21 @@ struct SessionEventFrame: Decodable, Sendable {
     let payload: JSONValue?
 
     enum CodingKeys: String, CodingKey {
-        case type, seq, epoch, volatile, payload
+        case type, change, seq, epoch, volatile, payload, session
         case sessionID = "session_id"
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decode(String.self, forKey: .type)
+        change = try? c.decodeIfPresent(String.self, forKey: .change)
+        seq = try? c.decodeIfPresent(Int.self, forKey: .seq)
+        epoch = try? c.decodeIfPresent(String.self, forKey: .epoch)
+        volatile = try? c.decodeIfPresent(Bool.self, forKey: .volatile)
+        let sessionObj = try? c.decodeIfPresent(JSONValue.self, forKey: .session)
+        sessionID = (try? c.decodeIfPresent(String.self, forKey: .sessionID))
+            ?? sessionObj?["id"]?.stringValue
+        payload = try? c.decodeIfPresent(JSONValue.self, forKey: .payload)
     }
 }
 
@@ -26,6 +40,8 @@ enum StreamSignal: Sendable {
     case resyncRequired([String])
     /// 对话正文的增量（`subscribe_v2` 订阅的 `transcript.reset` / `transcript.ops`）。
     case transcript(sessionID: String, TranscriptWireEvent)
+    /// 2.6+ 的 turns / items 正文帧。
+    case conversation(sessionID: String, ConversationWireEvent)
     case agentState(sessionID: String, SessionAgentState)
     case agentUsage(sessionID: String, SessionContextUsage)
     case interaction(InteractionFrame)
@@ -36,14 +52,14 @@ enum StreamSignal: Sendable {
 
 /// kap-server 的 WebSocket 事件通道。
 ///
-/// 旧 `subscribe` 只服务于旧版原始事件与 seq/epoch 游标；所有版本都发送 `subscribe_v2`：
-/// transcript 逐字增量、2.4+ 的 interaction，以及 2.5+ 的全量 agent / usage 都由它驱动。
-/// 新版在订阅 ack 后重发 pending 和状态快照；正文另按 `transcript_since` 续传。
-/// 主动订阅只在 client_hello 后发送，ack 失败会退避重试。
+/// 2.0–2.5 使用 client_hello + subscribe_v2，正文按 transcript_since 续传。
+/// 2.6+ 连接后直接发送带 request_id 的 subscribe，由 response 确认，正文改为 turns / items 全量与增量帧。
+/// 两版都接收全量 agent / usage 与 interaction；订阅失败会退避重试。
 actor EventStream {
     private let endpoint: Endpoint
     private let tokenProvider: @Sendable () async -> String?
     private let clientID: String
+    private let wireProtocol: TranscriptProtocol
     private let logger = Logger(subsystem: "com.qinkun.kimicode", category: "ws")
 
     private var task: URLSessionWebSocketTask?
@@ -90,10 +106,12 @@ actor EventStream {
     init(
         endpoint: Endpoint,
         clientID: String = "ios_\(UUID().uuidString.prefix(8))",
+        wireProtocol: TranscriptProtocol = .legacy,
         tokenProvider: @escaping @Sendable () async -> String?
     ) {
         self.endpoint = endpoint
         self.clientID = clientID
+        self.wireProtocol = wireProtocol
         self.tokenProvider = tokenProvider
     }
 
@@ -121,7 +139,7 @@ actor EventStream {
         continuation = nil
     }
 
-    /// 旧版会话事件订阅。2.5+ 会忽略它，真正的正文与状态订阅走 subscribe_v2。
+    /// 旧版另发 subscribe_v2 订阅 transcript；2.6+ 这个 subscribe 同时覆盖正文与状态。
     func subscribe(to sessionID: String) async {
         subscribedSessions.insert(sessionID)
         clearSubscriptionRetry(kind: .session, sessionID: sessionID)
@@ -132,6 +150,7 @@ actor EventStream {
     /// 订阅对话正文的逐字增量（与网页端 `sendTranscriptSubscribe` 一致：`main` 走 `delta` 级别）。
     /// `since` 是已经拿到的批次序号：服务端据此补发缺的 ops，补不上就发一个 `transcript.reset`。
     func subscribeTranscript(_ sessionID: String, since: Int?) async {
+        guard wireProtocol == .legacy else { return }
         transcriptSubscriptions[sessionID] = since
         clearSubscriptionRetry(kind: .transcript, sessionID: sessionID)
         guard canSendSubscriptions else { return }
@@ -167,6 +186,15 @@ actor EventStream {
         clearSubscriptionRetry(kind: .session, sessionID: sessionID)
         clearSubscriptionRetry(kind: .transcript, sessionID: sessionID)
         guard canSendSubscriptions else { return }
+        if wireProtocol == .conversation {
+            await send([
+                "type": .string("unsubscribe"),
+                "request_id": .string(nextMessageID()),
+                "session_id": .string(sessionID),
+                "agent_ids": .array([.string("main")]),
+            ])
+            return
+        }
         await send([
             "type": .string("unsubscribe"),
             "id": .string(nextMessageID()),
@@ -270,34 +298,43 @@ actor EventStream {
             if self.task === task { self.task = nil }
         }
 
-        // 第一帧必须是 server_hello。
-        let hello = try await receiveFrame(on: task)
-        guard hello["type"]?.stringValue == "server_hello" else {
-            throw KapError.http(status: 0, body: "期待 server_hello，收到 \(hello["type"]?.stringValue ?? "?")")
+        if wireProtocol == .conversation {
+            // 2.6 连接打开后直接订阅；没有 server_hello / client_hello。
+            canSendSubscriptions = true
+            for sessionID in subscribedSessions {
+                await sendSessionSubscription(sessionID)
+            }
+            continuation?.yield(.connected(heartbeatMS: nil))
+        } else {
+            // 第一帧必须是 server_hello。
+            let hello = try await receiveFrame(on: task)
+            guard hello["type"]?.stringValue == "server_hello" else {
+                throw KapError.http(status: 0, body: "期待 server_hello，收到 \(hello["type"]?.stringValue ?? "?")")
+            }
+            lastActivity = .now
+            let heartbeatMS = hello["payload"]?["heartbeat_ms"]?.intValue
+            if let heartbeatMS { self.heartbeatMS = heartbeatMS }
+            logger.info("server_hello protocol=\(hello["payload"]?["protocol_version"]?.intValue ?? -1)")
+
+            // client_hello：把已订阅的会话和游标一起带上，服务端会回 ack。
+            await send([
+                "type": .string("client_hello"),
+                "id": .string(nextMessageID()),
+                "payload": .object([
+                    "client_id": .string(clientID),
+                    "subscriptions": .array(subscribedSessions.map { .string($0) }),
+                    "cursors": cursorPayload(for: subscribedSessions),
+                ]),
+            ])
+            canSendSubscriptions = true
+
+            for sessionID in transcriptSubscriptions.keys {
+                await sendTranscriptSubscribe(sessionID)
+            }
+
+            continuation?.yield(.connected(heartbeatMS: heartbeatMS))
+            startKeepAlive(intervalMS: heartbeatMS ?? 10_000)
         }
-        lastActivity = .now
-        let heartbeatMS = hello["payload"]?["heartbeat_ms"]?.intValue
-        if let heartbeatMS { self.heartbeatMS = heartbeatMS }
-        logger.info("server_hello protocol=\(hello["payload"]?["protocol_version"]?.intValue ?? -1)")
-
-        // client_hello：把已订阅的会话和游标一起带上，服务端会回 ack。
-        await send([
-            "type": .string("client_hello"),
-            "id": .string(nextMessageID()),
-            "payload": .object([
-                "client_id": .string(clientID),
-                "subscriptions": .array(subscribedSessions.map { .string($0) }),
-                "cursors": cursorPayload(for: subscribedSessions),
-            ]),
-        ])
-        canSendSubscriptions = true
-
-        for sessionID in transcriptSubscriptions.keys {
-            await sendTranscriptSubscribe(sessionID)
-        }
-
-        continuation?.yield(.connected(heartbeatMS: heartbeatMS))
-        startKeepAlive(intervalMS: heartbeatMS ?? 10_000)
 
         while !isStopped, !Task.isCancelled {
             let frame = try await receiveFrame(on: task)
@@ -349,7 +386,30 @@ actor EventStream {
         guard let type = frame["type"]?.stringValue else { return }
 
         switch type {
-        case "pong", "ping":
+        case "pong":
+            return
+
+        case "ping":
+            if wireProtocol == .conversation {
+                Task { [weak self] in
+                    await self?.send(["type": .string("pong")])
+                }
+            }
+            return
+
+        case "response":
+            guard wireProtocol == .conversation,
+                  let id = frame["request_id"]?.stringValue,
+                  let pending = pendingSubscriptionAcks.removeValue(forKey: id) else { return }
+            let code = frame["code"]?.intValue ?? -1
+            if code == 0 {
+                clearSubscriptionRetry(kind: pending.kind, sessionID: pending.sessionID)
+                continuation?.yield(.interactionsReset(sessionID: pending.sessionID))
+            } else {
+                scheduleSubscriptionRetry(kind: pending.kind, sessionID: pending.sessionID)
+                let message = frame["msg"]?.stringValue ?? "订阅失败（code \(code)）"
+                continuation?.yield(.subscriptionFailed(sessionID: pending.sessionID, message: message))
+            }
             return
 
         case "ack":
@@ -398,6 +458,21 @@ actor EventStream {
             continuation?.yield(.resyncRequired(sessions))
             return
 
+        case "turns", "turns.removed", "turns.failed", "turn.started", "turn.updated", "turn.ended",
+             "item.started", "item.updated", "item.ended", "item.delta", "item.removed", "notice":
+            guard wireProtocol == .conversation,
+                  frame["agent_id"]?.stringValue == "main",
+                  let sessionID = frame["session_id"]?.stringValue,
+                  let data = try? JSONEncoder().encode(frame) else { return }
+            do {
+                let event = try JSONDecoder().decode(ConversationWireEvent.self, from: data)
+                continuation?.yield(.conversation(sessionID: sessionID, event))
+            } catch {
+                logger.error("conversation 帧解析失败：\(error.localizedDescription)")
+                continuation?.yield(.resyncRequired([sessionID]))
+            }
+            return
+
         case "agent":
             guard frame["agent_id"]?.stringValue == "main",
                   let sessionID = frame["session_id"]?.stringValue,
@@ -410,7 +485,7 @@ actor EventStream {
             }
             return
 
-        case "usage":
+        case "context", "usage":
             guard frame["agent_id"]?.stringValue == "main",
                   let sessionID = frame["session_id"]?.stringValue,
                   let data = try? JSONEncoder().encode(frame) else { return }
@@ -418,7 +493,7 @@ actor EventStream {
                 let usage = try JSONDecoder().decode(SessionContextUsage.self, from: data)
                 continuation?.yield(.agentUsage(sessionID: sessionID, usage))
             } catch {
-                logger.error("usage 状态帧解析失败：\(error.localizedDescription)")
+                logger.error("\(type) 状态帧解析失败：\(error.localizedDescription)")
             }
             return
 
@@ -505,6 +580,15 @@ actor EventStream {
     private func sendSessionSubscription(_ sessionID: String) async {
         let id = nextMessageID()
         pendingSubscriptionAcks[id] = PendingSubscription(kind: .session, sessionID: sessionID)
+        if wireProtocol == .conversation {
+            await send([
+                "type": .string("subscribe"),
+                "request_id": .string(id),
+                "session_id": .string(sessionID),
+                "agent_ids": .array([.string("main")]),
+            ])
+            return
+        }
         await send([
             "type": .string("subscribe"),
             "id": .string(id),
