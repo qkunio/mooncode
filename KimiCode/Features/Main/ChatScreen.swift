@@ -5,6 +5,7 @@ struct ChatScreen: View {
     let openSidebar: () -> Void
 
     @Environment(AppModel.self) private var app
+    @Environment(\.openURL) private var openURL
     @State private var isAddingWorkspace = false
     @State private var confirmedEmptyDeviceID: String?
     /// 加载中的小脸与对话页欢迎语里的小脸是同一个：数据到了就从这里滑到对话页的位置。
@@ -14,7 +15,7 @@ struct ChatScreen: View {
     /// 还在拉设备 / 设备数据：中间只放 Kimi 小脸，其他界面等数据到了再出来。
     private var isBooting: Bool {
         if !app.hasLoadedDevices || app.isLoadingDevices { return true }
-        return !app.onlineDevices.isEmpty && app.chat == nil && confirmedEmptyDeviceID == nil
+        return !app.onlineDevices.isEmpty && app.chat == nil && confirmedEmptyDeviceID == nil && !app.isCompatibilityError
     }
 
     private var emptyWorkspaceDeviceID: String? {
@@ -53,6 +54,25 @@ struct ChatScreen: View {
                 .presentationDetents([.large])
             }
         }
+        .alert(
+            app.isCompatibilityError ? "版本暂未兼容" : "出错了",
+            isPresented: .init(
+                get: { app.errorMessage != nil },
+                set: { if !$0 { app.clearError() } }
+            )
+        ) {
+            if app.isCompatibilityError, let url = app.webFallbackURL {
+                Button("使用网页版") {
+                    app.clearError()
+                    openURL(url)
+                }
+                Button("好", role: .cancel) { app.clearError() }
+            } else {
+                Button("好") { app.clearError() }
+            }
+        } message: {
+            Text(app.errorMessage ?? "")
+        }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button(action: openSidebar) {
@@ -86,6 +106,25 @@ struct ChatScreen: View {
                     withAnimation(.spring(duration: 0.6, bounce: 0.3)) { isBootFaceShown = true }
                 }
                 .allowsHitTesting(false)
+        } else if app.isCompatibilityError {
+            ContentUnavailableView {
+                Label("版本暂未兼容", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(KapError.protocolMismatchMessage)
+            } actions: {
+                HStack(spacing: 12) {
+                    if let url = app.webFallbackURL {
+                        Button("使用网页版") {
+                            openURL(url)
+                        }
+                        .buttonStyle(.glassProminent)
+                    }
+                    Button("重试") {
+                        Task { await app.refreshDeviceData() }
+                    }
+                    .buttonStyle(.glass)
+                }
+            }
         } else if app.onlineDevices.isEmpty {
             ContentUnavailableView {
                 Label("没有在线的设备", systemImage: "laptopcomputer.slash")
@@ -154,6 +193,7 @@ private struct ChatContent: View {
     let face: Namespace.ID
 
     @Environment(AppModel.self) private var app
+    @Environment(\.openURL) private var openURL
     /// 输入框的字。切对话时这个视图整个重建，所以每次改动都存进 `AppModel`，回来时从那里取。
     @State private var draft: String
     /// 点了对话里的文件提及，正在预览的文件。
@@ -293,13 +333,21 @@ private struct ChatContent: View {
             .onChange(of: draft) { _, text in app.setComposerDraft(text, for: chat) }
         }
         .alert(
-            "出错了",
+            chat.isCompatibilityError ? "版本暂未兼容" : "出错了",
             isPresented: .init(
                 get: { chat.errorMessage != nil },
-                set: { if !$0 { chat.errorMessage = nil } }
+                set: { if !$0 { chat.clearError() } }
             )
         ) {
-            Button("好") { chat.errorMessage = nil }
+            if chat.isCompatibilityError, let url = app.webFallbackURL {
+                Button("使用网页版") {
+                    chat.clearError()
+                    openURL(url)
+                }
+                Button("好", role: .cancel) { chat.clearError() }
+            } else {
+                Button("好") { chat.clearError() }
+            }
         } message: {
             Text(chat.errorMessage ?? "")
         }

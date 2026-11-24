@@ -5,6 +5,7 @@ struct AccountSheet: View {
     @Binding var showsDevicesInSidebar: Bool
 
     @Environment(AppModel.self) private var app
+    @Environment(\.openURL) private var openURL
     @State private var isSavingDefault = false
     @State private var actionError: String?
     @State private var isConfirmingSignOut = false
@@ -18,6 +19,33 @@ struct AccountSheet: View {
 
                     card {
                         Toggle("在会话栏中显示设备列表", isOn: $showsDevicesInSidebar)
+                    }
+
+                    if !app.isDemoMode {
+                        card {
+                            Button {
+                                if let url = app.webFallbackURL {
+                                    openURL(url)
+                                }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Text("打开Kimi Code网页版")
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "safari")
+                                        .font(.body)
+                                        .foregroundStyle(.secondary)
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .frame(minHeight: 32)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(app.webFallbackURL == nil)
+                        }
                     }
 
                     if !showsDevicesInSidebar {

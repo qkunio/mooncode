@@ -22,6 +22,26 @@ struct Endpoint: Codable, Hashable, Sendable, Identifiable {
         return components?.url
     }
 
+    /// 官方远程控制网页版地址（与 `kimi rc` 终端输出的链接格式一致）。
+    func webURL(sessionID: String? = nil) -> URL? {
+        let target: URL
+        if let sessionID, !sessionID.isEmpty {
+            target = baseURL.appending(path: "sessions/\(sessionID)")
+        } else {
+            target = baseURL
+        }
+        var components = URLComponents(url: target, resolvingAgainstBaseURL: false)
+        if sessionID == nil || sessionID?.isEmpty == true,
+           let path = components?.path, !path.hasSuffix("/") {
+            components?.path = path + "/"
+        }
+        components?.queryItems = [
+            URLQueryItem(name: "rc", value: "1"),
+            URLQueryItem(name: "from", value: "kimi_code_cli"),
+        ]
+        return components?.url
+    }
+
     static func remote(deviceID: String, relayOrigin: URL = KimiConfig.relayOrigin, name: String) -> Endpoint {
         Endpoint(
             baseURL: relayOrigin.appending(path: "devices/\(deviceID)"),
@@ -40,4 +60,6 @@ enum KimiConfig {
     static let oauthClientID = "17e5f671-d194-4dfb-9706-5516cb48c098"
     /// 「Kimi 订阅」这组模型的 provider id（网页端常量 `gT`）。模型菜单里这组排最前。
     static let kimiSubscriptionProvider = "managed:kimi-code"
+    /// 当前版本已验证适配的 Kimi Code 截止日期（每次发版更新此处，用于更新通知弹窗）。
+    static let supportedKimiCodeDate = "2026年11月24日"
 }

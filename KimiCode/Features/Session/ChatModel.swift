@@ -53,6 +53,8 @@ final class ChatModel {
     private var awaitingTurnTimeout: Task<Void, Never>?
     private(set) var connectionState: ConnectionState = .idle
     var errorMessage: String?
+    /// 最近一次错误是否疑似上游 Kimi Code 协议不兼容（弹窗附带「使用网页版」按钮）。
+    var isCompatibilityError = false
     /// 撤销后放回输入框的原文（官方：「已撤销，原文已放回输入框」）。
     var restoredDraft: String?
 
@@ -354,10 +356,25 @@ final class ChatModel {
 
     // MARK: 读
 
+    func clearError() {
+        errorMessage = nil
+        isCompatibilityError = false
+    }
+
+    private func presentError(_ error: any Error) {
+        if KapError.isProtocolMismatch(error) {
+            isCompatibilityError = true
+            errorMessage = KapError.protocolMismatchMessage
+        } else {
+            isCompatibilityError = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// 全量重拉：正文尾部一页 + 待处理的确认/提问 + composer 状态。
     func reload() async {
         guard let sessionID else { return }
-        errorMessage = nil
+        clearError()
         // 只在屏幕上什么都没有时显示骨架屏（打开已有会话的首屏）。草稿发出第一条后建会话再重拉，
         // 那条消息已经乐观显示着，不该在它上面再冒骨架。
         isLoading = isRefreshingStale || (entries.isEmpty && optimisticPrompts.isEmpty)
@@ -407,7 +424,7 @@ final class ChatModel {
                   (error as? URLError)?.code != .cancelled else { return }
             // 重拉失败就把旧正文放回来，总比一直挂着骨架强。
             isRefreshingStale = false
-            errorMessage = error.localizedDescription
+            presentError(error)
         }
     }
 
@@ -430,7 +447,7 @@ final class ChatModel {
             rebuild()
         } catch {
             guard !(error is CancellationError) else { return }
-            errorMessage = error.localizedDescription
+            presentError(error)
         }
     }
 
@@ -447,7 +464,7 @@ final class ChatModel {
             } catch let KapError.api(code, _) where code == KapErrorCode.notFound {
             } catch {
                 guard interactionProtocol != .frames else { return }
-                errorMessage = error.localizedDescription
+                presentError(error)
                 return
             }
         }
@@ -464,7 +481,7 @@ final class ChatModel {
             interactions.reset()
         } catch {
             guard interactionProtocol != .frames else { return }
-            errorMessage = error.localizedDescription
+            presentError(error)
         }
     }
 
@@ -596,7 +613,7 @@ final class ChatModel {
             if let status = try? await legacyStatus(sessionID), !usesStateStream { apply(status) }
         } catch {
             config = previous
-            errorMessage = error.localizedDescription
+            presentError(error)
         }
     }
 
@@ -690,7 +707,7 @@ final class ChatModel {
             rebuild()
             scheduleOfflineReload()
         } catch {
-            errorMessage = error.localizedDescription
+            presentError(error)
             if let index = optimisticPrompts.firstIndex(where: { $0.id == optimistic.id }) {
                 optimisticPrompts[index].failed = true
             }
@@ -719,7 +736,7 @@ final class ChatModel {
         do {
             try await client.abort(sessionID)
         } catch {
-            errorMessage = error.localizedDescription
+            presentError(error)
         }
         scheduleOfflineReload()
     }
@@ -735,7 +752,7 @@ final class ChatModel {
             }
             restoredDraft = entry.text
         } catch {
-            errorMessage = error.localizedDescription
+            presentError(error)
         }
         scheduleOfflineReload()
     }
@@ -763,7 +780,7 @@ final class ChatModel {
             }
             if !resolved { errorMessage = "这条确认已经在别处处理过了。" }
         } catch {
-            errorMessage = error.localizedDescription
+            presentError(error)
             interactions = snapshot
         }
     }
@@ -784,7 +801,7 @@ final class ChatModel {
             }
             if !resolved { errorMessage = "这个问题已经在别处回答过了。" }
         } catch {
-            errorMessage = error.localizedDescription
+            presentError(error)
             interactions = snapshot
         }
     }
@@ -803,7 +820,7 @@ final class ChatModel {
                 try await client.dismiss(question: question.questionID, in: sessionID)
             }
         } catch {
-            errorMessage = error.localizedDescription
+            presentError(error)
             interactions = snapshot
         }
     }

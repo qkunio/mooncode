@@ -107,4 +107,24 @@ enum KapError: LocalizedError {
         default: false
         }
     }
+
+    /// 疑似 Kimi Code 升级导致的协议不兼容（字段解码失败、路由 404 或接口参数校验变更 40001）。
+    var isLikelyProtocolMismatch: Bool {
+        switch self {
+        case .decoding:
+            true
+        case let .http(status, _):
+            status == 404
+        case let .api(code, _):
+            code == KapErrorCode.validationFailed
+        case .notConnected, .cancelled:
+            false
+        }
+    }
+
+    static let protocolMismatchMessage = "你的KimiCode版本太新了，MoonCode正在加速适配新版KimiCode"
+
+    static func isProtocolMismatch(_ error: any Error) -> Bool {
+        (error as? KapError)?.isLikelyProtocolMismatch == true
+    }
 }

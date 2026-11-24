@@ -9,6 +9,7 @@ struct MainView: View {
     @State private var isSidebarOpen = false
     @State private var dragTranslation: CGFloat = 0
     @State private var isDraggingSidebar = false
+    @State private var isShowingUpdateNotice = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -60,6 +61,22 @@ struct MainView: View {
         }
         .onChange(of: isSidebarOpen) { _, open in
             if open { Task { await model.refreshSidebar() } }
+        }
+        .task {
+            guard !model.isDemoMode, AppUpdateNotice.shouldPresent() else { return }
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, !model.isDemoMode, AppUpdateNotice.shouldPresent() else { return }
+            isShowingUpdateNotice = true
+        }
+        .sheet(isPresented: $isShowingUpdateNotice, onDismiss: {
+            AppUpdateNotice.markPresented()
+        }) {
+            UpdateNoticeSheet {
+                AppUpdateNotice.markPresented()
+                isShowingUpdateNotice = false
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
     }
 

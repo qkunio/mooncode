@@ -40,6 +40,18 @@ final class AppModel {
     var hasPlayedSplash = false
 
     var errorMessage: String?
+    /// 最近一次错误是否疑似上游 Kimi Code 新版协议不兼容（弹窗与空态提供「使用网页版」兜底）。
+    var isCompatibilityError = false
+
+    /// 当前设备（或第一台在线设备）对应的官方网页版地址；体验模式下不提供。
+    var webFallbackURL: URL? {
+        guard !isDemoMode else { return nil }
+        if let endpoint {
+            return endpoint.webURL(sessionID: chat?.sessionID)
+        }
+        guard let device = onlineDevices.first else { return nil }
+        return Endpoint.remote(deviceID: device.deviceID, name: device.shortName).webURL()
+    }
 
     private static let lastDeviceKey = "kimi.lastDeviceID"
     private static let composerConfigKey = "kimi.composerConfig"
@@ -115,7 +127,7 @@ final class AppModel {
                 if lhs.isOnline != rhs.isOnline { return lhs.isOnline }
                 return lhs.alias.localizedCaseInsensitiveCompare(rhs.alias) == .orderedAscending
             }
-            errorMessage = nil
+            clearError()
         } catch {
             handle(error)
         }
@@ -156,7 +168,7 @@ final class AppModel {
                 ($0.lastOpenedAt?.date ?? .distantPast) > ($1.lastOpenedAt?.date ?? .distantPast)
             }
             self.sessions = try await sessions.items
-            errorMessage = nil
+            clearError()
         } catch {
             handle(error)
         }
@@ -382,7 +394,13 @@ final class AppModel {
         models = []
         hasLoadedDevices = false
         isDemoMode = false
+        clearError()
         auth.signOut()
+    }
+
+    func clearError() {
+        errorMessage = nil
+        isCompatibilityError = false
     }
 
     private func handle(_ error: any Error) {
@@ -390,7 +408,13 @@ final class AppModel {
             signOut()
             return
         }
-        errorMessage = error.localizedDescription
+        if KapError.isProtocolMismatch(error) {
+            isCompatibilityError = true
+            errorMessage = KapError.protocolMismatchMessage
+        } else {
+            isCompatibilityError = false
+            errorMessage = error.localizedDescription
+        }
     }
 }
 

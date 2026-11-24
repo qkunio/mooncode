@@ -181,6 +181,14 @@ import Foundation
         precondition(pendingList.questions.count == 1 && pendingList.questions[0].questionID == "q27")
         precondition(ProviderWireType(rawValue: "bedrock") == .bedrock)
 
-        print("PASS: legacy status, 2.6 pages/streaming/attachments/object outputs, 2.7/KAP 1.0.0, interactions and config patches")
+        let endpoint = Endpoint.remote(deviceID: "dev-123", name: "Mac")
+        precondition(endpoint.webURL()?.absoluteString == "https://code-rc.kimi.com/devices/dev-123/?rc=1&from=kimi_code_cli")
+        precondition(endpoint.webURL(sessionID: "sess-9")?.absoluteString == "https://code-rc.kimi.com/devices/dev-123/sessions/sess-9?rc=1&from=kimi_code_cli")
+        precondition(KapError.http(status: 404, body: "").isLikelyProtocolMismatch)
+        precondition(KapError.api(code: KapErrorCode.validationFailed, message: "bad").isLikelyProtocolMismatch)
+        precondition(!KapError.http(status: 502, body: "").isLikelyProtocolMismatch)
+        precondition(!KapError.http(status: 401, body: "").isLikelyProtocolMismatch)
+
+        print("PASS: legacy status, 2.6 pages/streaming/attachments/object outputs, 2.7/KAP 1.0.0, web fallback, interactions and config patches")
     }
 }
