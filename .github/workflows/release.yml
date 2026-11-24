@@ -1,0 +1,326 @@
+name: Release to App Store
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing Git tag to release (e.g. v1.9)'
+        required: true
+        type: string
+      release_notes:
+        description: 'Optional override for zh-Hans release notes (defaults to Git tag annotation)'
+        required: false
+        type: string
+        default: ''
+      submit_for_review:
+        description: 'Automatically submit for App Store review after build processing'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appstore-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Archive, Upload & Submit
+    runs-on: macos-26
+    environment: appstore-release
+    timeout-minutes: 90
+    permissions:
+      contents: write
+
+    env:
+      BUNDLE_ID: com.qinkun.kimicode
+      SCHEME: KimiCode
+      PROJECT: KimiCode.xcodeproj
+      LOCALE: zh-Hans
+      RELEASE_TYPE: AFTER_APPROVAL
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve version, build number, and release notes
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_NOTES: ${{ inputs.release_notes }}
+          INPUT_SUBMIT: ${{ inputs.submit_for_review }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${INPUT_TAG}" ]; then
+            TAG_NAME="${INPUT_TAG}"
+          else
+            TAG_NAME="${GITHUB_REF_NAME}"
+          fi
+
+          VERSION="${TAG_NAME#v}"
+          if ! [[ "${VERSION}" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+            echo "::error::Tag '${TAG_NAME}' must match vX.Y or vX.Y.Z (got version '${VERSION}')."
+            exit 1
+          fi
+
+          BUILD_NUMBER="$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}"
+          NOTES_FILE="${RUNNER_TEMP}/release_notes.txt"
+
+          if [ -n "${INPUT_NOTES}" ]; then
+            printf '%s\n' "${INPUT_NOTES}" > "${NOTES_FILE}"
+          else
+            OBJ_TYPE="$(git cat-file -t "refs/tags/${TAG_NAME}" 2>/dev/null || true)"
+            if [ "${OBJ_TYPE}" != "tag" ]; then
+              echo "::error::Tag '${TAG_NAME}' is a lightweight tag without annotation. Use an annotated tag: git tag -a ${TAG_NAME} -m '更新内容...'"
+              exit 1
+            fi
+            git for-each-ref --format='%(contents)' "refs/tags/${TAG_NAME}" > "${NOTES_FILE}"
+          fi
+
+          if [ -z "$(tr -d '[:space:]' < "${NOTES_FILE}")" ]; then
+            echo "::error::Release notes from tag '${TAG_NAME}' are empty."
+            exit 1
+          fi
+
+          SUBMIT_FLAG="true"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${INPUT_SUBMIT}" = "false" ]; then
+            SUBMIT_FLAG="false"
+          fi
+
+          echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "build_number=${BUILD_NUMBER}" >> "${GITHUB_OUTPUT}"
+          echo "notes_file=${NOTES_FILE}" >> "${GITHUB_OUTPUT}"
+          echo "submit_for_review=${SUBMIT_FLAG}" >> "${GITHUB_OUTPUT}"
+
+          echo "Tag: ${TAG_NAME} -> Marketing Version: ${VERSION}, Build Number: ${BUILD_NUMBER}"
+          echo "Submit for review: ${SUBMIT_FLAG}"
+          echo "--- Release Notes (${LOCALE}) ---"
+          cat "${NOTES_FILE}"
+          echo "---------------------------------"
+
+      - name: Verify Xcode toolchain
+        run: |
+          xcodebuild -version
+          xcodebuild -project "${PROJECT}" -list
+
+      - name: Install Python dependencies for App Store Connect API
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install "PyJWT[crypto]>=2.8.0"
+
+      - name: Setup signing keychain and import Apple Distribution certificate
+        id: cert
+        env:
+          DIST_CERT_P12_BASE64: ${{ secrets.DIST_CERT_P12_BASE64 }}
+          DIST_CERT_PASSWORD: ${{ secrets.DIST_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          P12_PATH="${RUNNER_TEMP}/dist.p12"
+          KEYCHAIN_PATH="${RUNNER_TEMP}/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+
+          printf '%s' "${DIST_CERT_P12_BASE64}" | base64 --decode > "${P12_PATH}"
+
+          # macOS Keychain exports legacy PKCS#12 ciphers; try OpenSSL 3 -legacy first.
+          CERT_PEM="${RUNNER_TEMP}/dist_cert.pem"
+          if ! openssl pkcs12 -in "${P12_PATH}" -passin env:DIST_CERT_PASSWORD -clcerts -nokeys -legacy -out "${CERT_PEM}" 2>/dev/null; then
+            openssl pkcs12 -in "${P12_PATH}" -passin env:DIST_CERT_PASSWORD -clcerts -nokeys -out "${CERT_PEM}"
+          fi
+          CERT_SERIAL="$(openssl x509 -in "${CERT_PEM}" -noout -serial | sed 's/^serial=//')"
+          rm -f "${CERT_PEM}"
+
+          if [ -z "${CERT_SERIAL}" ]; then
+            echo "::error::Failed to extract certificate serial number from DIST_CERT_P12_BASE64."
+            exit 1
+          fi
+
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security import "${P12_PATH}" -P "${DIST_CERT_PASSWORD}" -A -t cert -f pkcs12 -k "${KEYCHAIN_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+
+          security find-identity -v -p codesigning "${KEYCHAIN_PATH}"
+
+          echo "cert_serial=${CERT_SERIAL}" >> "${GITHUB_OUTPUT}"
+          echo "keychain_path=${KEYCHAIN_PATH}" >> "${GITHUB_OUTPUT}"
+
+      - name: Write App Store Connect API key
+        id: asc_key
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          KEY_DIR="${RUNNER_TEMP}/private_keys"
+          KEY_PATH="${KEY_DIR}/AuthKey_${ASC_KEY_ID}.p8"
+          mkdir -p "${KEY_DIR}"
+          printf '%s\n' "${ASC_PRIVATE_KEY}" > "${KEY_PATH}"
+          chmod 600 "${KEY_PATH}"
+          echo "key_path=${KEY_PATH}" >> "${GITHUB_OUTPUT}"
+
+      - name: Fetch or sync App Store provisioning profile
+        id: profile
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_PRIVATE_KEY_PATH: ${{ steps.asc_key.outputs.key_path }}
+        run: |
+          python3 scripts/asc_submit.py fetch-profile \
+            --bundle-id "${BUNDLE_ID}" \
+            --cert-serial "${{ steps.cert.outputs.cert_serial }}"
+
+      - name: Configure target-scoped Release signing and ExportOptions.plist
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROFILE_UUID: ${{ steps.profile.outputs.profile_uuid }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          BUILD_NUMBER: ${{ steps.meta.outputs.build_number }}
+        run: |
+          set -euo pipefail
+          printf 'DEVELOPMENT_TEAM = %s\n' "${APPLE_TEAM_ID}" > Config/Local.xcconfig
+
+          # Patch only the KimiCode target's Release buildSettings in the ephemeral runner
+          # workspace so SwiftPM targets (e.g. SwiftMath) never inherit provisioning profile flags.
+          python3 - <<'PY'
+          import os, pathlib, plistlib, re
+
+          pbx_path = pathlib.Path("KimiCode.xcodeproj/project.pbxproj")
+          content = pbx_path.read_text(encoding="utf-8")
+
+          team_id = os.environ["APPLE_TEAM_ID"]
+          profile_uuid = os.environ["PROFILE_UUID"]
+          version = os.environ["VERSION"]
+          build_number = os.environ["BUILD_NUMBER"]
+
+          # Locate the KimiCode target's Release XCBuildConfiguration block (contains PRODUCT_BUNDLE_IDENTIFIER).
+          pattern = re.compile(
+              r'(\t\t[A-F0-9]+ /\* Release \*/ = \{\n\t\t\tisa = XCBuildConfiguration;.*?buildSettings = \{)(.*?)(\n\t\t\t\};\n\t\t\tname = Release;)',
+              re.DOTALL,
+          )
+          matches = [
+              m for m in pattern.finditer(content)
+              if f'PRODUCT_BUNDLE_IDENTIFIER = {os.environ["BUNDLE_ID"]};' in m.group(2)
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"Expected 1 KimiCode Release XCBuildConfiguration in project.pbxproj, found {len(matches)}"
+              )
+          match = matches[0]
+          block = match.group(2)
+
+          def upsert(src: str, key_pattern: str, line: str) -> str:
+              new_src, count = re.subn(rf'(?m)^\t\t\t\t{key_pattern} = [^;]+;$', f'\t\t\t\t{line}', src)
+              if count == 0:
+                  return src + f'\n\t\t\t\t{line}'
+              return new_src
+
+          block = upsert(block, r'CODE_SIGN_IDENTITY', 'CODE_SIGN_IDENTITY = "Apple Distribution";')
+          block = upsert(block, r'"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]"', '"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Distribution";')
+          block = upsert(block, r'CODE_SIGN_STYLE', 'CODE_SIGN_STYLE = Manual;')
+          block = upsert(block, r'DEVELOPMENT_TEAM', f'DEVELOPMENT_TEAM = {team_id};')
+          block = upsert(block, r'PROVISIONING_PROFILE_SPECIFIER', f'PROVISIONING_PROFILE_SPECIFIER = "{profile_uuid}";')
+          block = upsert(block, r'MARKETING_VERSION', f'MARKETING_VERSION = {version};')
+          block = upsert(block, r'CURRENT_PROJECT_VERSION', f'CURRENT_PROJECT_VERSION = {build_number};')
+
+          updated = content[:match.start(2)] + block + content[match.end(2):]
+          pbx_path.write_text(updated, encoding="utf-8")
+          print(f"Patched KimiCode Release signing in {pbx_path} (v{version} build {build_number})")
+
+          src = pathlib.Path("Config/ExportOptions.plist")
+          dst = pathlib.Path(os.environ["RUNNER_TEMP"]) / "ExportOptions.plist"
+          with src.open("rb") as f:
+              data = plistlib.load(f)
+          data["teamID"] = team_id
+          data["provisioningProfiles"] = {
+              os.environ["BUNDLE_ID"]: profile_uuid
+          }
+          with dst.open("wb") as f:
+              plistlib.dump(data, f)
+          print(f"Wrote {dst}")
+          PY
+
+      - name: Archive iOS Release build
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project "${PROJECT}" \
+            -scheme "${SCHEME}" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "${RUNNER_TEMP}/${SCHEME}.xcarchive"
+
+      - name: Upload archive to App Store Connect
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_PRIVATE_KEY_PATH: ${{ steps.asc_key.outputs.key_path }}
+        run: |
+          set -euo pipefail
+          xcodebuild -exportArchive \
+            -archivePath "${RUNNER_TEMP}/${SCHEME}.xcarchive" \
+            -exportPath "${RUNNER_TEMP}/export" \
+            -exportOptionsPlist "${RUNNER_TEMP}/ExportOptions.plist" \
+            -authenticationKeyPath "${ASC_PRIVATE_KEY_PATH}" \
+            -authenticationKeyID "${ASC_KEY_ID}" \
+            -authenticationKeyIssuerID "${ASC_ISSUER_ID}"
+
+      - name: Wait for build processing, write release notes, and submit for review
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_PRIVATE_KEY_PATH: ${{ steps.asc_key.outputs.key_path }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          BUILD_NUMBER: ${{ steps.meta.outputs.build_number }}
+          NOTES_FILE: ${{ steps.meta.outputs.notes_file }}
+          SUBMIT_FOR_REVIEW: ${{ steps.meta.outputs.submit_for_review }}
+        run: |
+          set -euo pipefail
+          EXTRA_ARGS=()
+          if [ "${SUBMIT_FOR_REVIEW}" != "true" ]; then
+            EXTRA_ARGS+=(--skip-submit)
+          fi
+
+          python3 scripts/asc_submit.py submit \
+            --bundle-id "${BUNDLE_ID}" \
+            --version "${VERSION}" \
+            --build-number "${BUILD_NUMBER}" \
+            --locale "${LOCALE}" \
+            --whats-new-file "${NOTES_FILE}" \
+            --release-type "${RELEASE_TYPE}" \
+            "${EXTRA_ARGS[@]}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.meta.outputs.tag_name }}
+          NOTES_FILE: ${{ steps.meta.outputs.notes_file }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            echo "GitHub Release ${TAG_NAME} already exists; skipping creation."
+          else
+            gh release create "${TAG_NAME}" \
+              --title "MoonCode ${TAG_NAME}" \
+              --notes-file "${NOTES_FILE}"
+          fi
+
+      - name: Clean up signing artifacts
+        if: always()
+        run: |
+          security delete-keychain "${RUNNER_TEMP}/app-signing.keychain-db" 2>/dev/null || true
+          rm -rf "${RUNNER_TEMP}/dist.p12" "${RUNNER_TEMP}/private_keys"
+          rm -f "${HOME}/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision
+          rm -f Config/Local.xcconfig
