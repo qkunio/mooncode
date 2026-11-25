@@ -14,9 +14,10 @@
 - **目标语言**：仅简体中文（`zh-Hans`）
 - **上架策略**：审核通过后自动上架（`AFTER_APPROVAL`）
 - **签名证书有效期**：`Apple Distribution` 证书有效期至 **2027-11-25**（到期前需重新导出 `.p12` 更新 Secret）
+- **Xcode Cloud**：原 `Default`（监听 `main` 分支自动 Archive）工作流已于 2026-11-25 停用，发版统一走 GitHub Actions。
 - **当前线上 / 审核状态**：
-  - App Store 版本 **`1.9`** 已手动提交审核中（所挂构建包为包内版本 `1.8` / Build `2`）。
-  - 因为 `1.9` 已被占用，**下一版请直接从 `v1.10`（或 `v2.0`）开始打 Tag**；从下一版起，`Git Tag = 包内 MARKETING_VERSION = App Store 版本号` 将由 CI 自动强制对齐，构建号自动按 `YYYYMMDD.<run_number>` 递增。
+  - App Store 版本 **`1.9`** 已过审上线（**可分发**，所挂构建包为包内版本 `1.8` / Build `2`）。
+  - 因为 `1.9` 已上线，**下一版请直接从 `v1.10`（或 `v2.0`）开始打 Tag**；从下一版起，`Git Tag = 包内 MARKETING_VERSION = App Store 版本号` 将由 CI 自动强制对齐，构建号自动按 `YYYYMMDD.<run_number>` 递增。
 
 ### 自动化接入清单
 
@@ -30,7 +31,8 @@
 - [x] 在 App Store Connect 生成 API Key（App 管理 / 管理权限）
 - [x] 从本机钥匙串导出 `Apple Distribution` `.p12` 证书（已本地验证导入与序列号解析，有效期至 2027-11-25）
 - [x] 在 GitHub 仓库创建 `appstore-release` Environment 并填入全部 6 个 Secrets
-- [ ] 等 `1.9` 过审后，在 `v1.10` 完成首次云端联调（建议首次先 `submit_for_review=false` 验证一次）
+- [x] 停用 App Store Connect 中旧的 Xcode Cloud `Default`（`main` 分支）工作流
+- [ ] 在 `v1.10` 完成首次云端联调（建议首次先 `submit_for_review=false` 验证一次，或直接推 `v1.10` 全自动提审）
 
 ---
 
@@ -146,4 +148,4 @@ gh run list --workflow=release.yml
 
 | App Store 版本 | 包内版本 / Build | Git Tag | 日期 | 发布方式 | 状态 | 备注 |
 |---|---|---|---|---|---|---|
-| `1.9` | `1.8` / `2` | — | 2026-11-24 | Xcode 手动 | 审核中 | 历史版本错位；下版起由 CI 从 `v1.10` 起自动对齐 |
+| `1.9` | `1.8` / `2` | — | 2026-11-24 | Xcode 手动 | 已上架（可分发） | 2026-11-25 确认过审上线；历史版本错位，下版起由 CI 从 `v1.10` 自动对齐 |
