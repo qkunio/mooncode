@@ -25,6 +25,7 @@
 - [x] 添加导出配置模板（`Config/ExportOptions.plist`）
 - [x] 实现 App Store Connect API 自动化脚本（`scripts/asc_submit.py`）
 - [x] 实现 GitHub Actions 自动发版流水线（`.github/workflows/release.yml`）
+- [x] 实现基于清单文件的发版触发器（`Config/release-manifest.json` + `.github/workflows/release-from-manifest.yml`）
 - [x] 实现本地打 Tag 辅助脚本（`scripts/release-tag.sh`）
 - [x] 本地离线校验（YAML / plist / XML / `pbxproj` 替换逻辑 / Mock API 单测）
 - [x] 将自动化配置文件 commit 并 push 到 `main`
@@ -38,10 +39,10 @@
 
 ## 2. 自动发布架构与相关文件
 
-推 `v*` 带注释 Tag 后，GitHub Actions（`macos-26`）全自动完成：
+推 `v*` 带注释 Tag，或在 `main` 分支更新 `Config/release-manifest.json`（`enabled: true`）后，GitHub Actions（`macos-26`）全自动完成：
 
 ```text
-push Tag (v1.10 + 中文更新日志注释)
+push Tag (v1.10 + 中文更新日志注释) 或 push Config/release-manifest.json (自动补打 Tag)
   → 校验版本号与更新日志
   → 导入临时 Keychain 中的 Apple Distribution .p12 证书
   → scripts/asc_submit.py fetch-profile（自动复用或重建 IOS_APP_STORE 描述文件）
@@ -55,7 +56,9 @@ push Tag (v1.10 + 中文更新日志注释)
 
 | 文件 | 作用 |
 |---|---|
-| `.github/workflows/release.yml` | GitHub Actions 发版工作流（响应 `v*` Tag 与手动 `workflow_dispatch`） |
+| `.github/workflows/release.yml` | GitHub Actions 核心发版工作流（响应 `v*` Tag、`workflow_dispatch` 与 `workflow_call`） |
+| `.github/workflows/release-from-manifest.yml` | 监听 `main` 分支 `Config/release-manifest.json` 变动，自动打带注释 Tag 并调用 `release.yml` |
+| `Config/release-manifest.json` | 声明式发版清单（用于通过 GitHub 网页端或 MCP 触发发版，默认 `enabled: false`） |
 | `scripts/asc_submit.py` | App Store Connect REST API 脚本（`fetch-profile` 自动管描述文件；`submit` 等构建 + 写 `zh-Hans` 日志 + `AFTER_APPROVAL` 提审） |
 | `scripts/release-tag.sh` | 本地一键发版脚本：更新 `MARKETING_VERSION`、编辑/校验中文日志、二次确认后打带注释 Tag 并推送 |
 | `Config/ExportOptions.plist` | `xcodebuild -exportArchive` 基础模板（`app-store-connect` + `upload` + `manual` + `manageAppVersionAndBuildNumber=false`） |
@@ -96,7 +99,7 @@ push Tag (v1.10 + 中文更新日志注释)
 
 ## 4. 日常发版操作
 
-平时往 `main` 正常 `git push` **不会**触发发版；仅在推送 `v*` Tag 时触发。
+平时往 `main` 正常 `git push` **不会**触发发版；仅在推送 `v*` Tag，或在 `main` 上修改 `Config/release-manifest.json`（且 `enabled: true`）时触发。
 
 ### 方式一：使用本地辅助脚本（推荐）
 ```bash
@@ -123,6 +126,19 @@ git push origin v1.10
 - 填入已存在的 `tag`（如 `v1.10`）；
 - 可选填写 `release_notes` 覆盖 Tag 注释；
 - 如需先只上传并填写更新日志、暂不点提审，将 `submit_for_review` 设为 `false`。
+
+### 方式四：通过 `Config/release-manifest.json` 触发（支持 GitHub MCP / 网页端）
+在 `main` 分支更新 `Config/release-manifest.json` 并提交：
+```json
+{
+  "enabled": true,
+  "version": "1.10",
+  "submit_for_review": true,
+  "release_notes": "1. 新增 xxx\n2. 修复 xxx"
+}
+```
+- `release-from-manifest.yml` 会在 `ubuntu-latest` 上校验字段并自动创建、推送带注释的 `v1.10` Tag，随后直接调用 `release.yml` 完成打包、上传与提审。
+- 若 `enabled` 为 `false` 或对应 `v<version>` Tag 已存在，工作流会安全跳过，不会重复发版。
 
 查看运行进度：
 ```bash

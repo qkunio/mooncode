@@ -20,6 +20,22 @@ on:
         required: false
         type: boolean
         default: true
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Existing Git tag to release (e.g. v1.10)'
+        required: true
+        type: string
+      release_notes:
+        description: 'Optional override for zh-Hans release notes (defaults to Git tag annotation)'
+        required: false
+        type: string
+        default: ''
+      submit_for_review:
+        description: 'Automatically submit for App Store review after build processing'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -92,7 +108,7 @@ jobs:
           fi
 
           SUBMIT_FLAG="true"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${INPUT_SUBMIT}" = "false" ]; then
+          if [ "${INPUT_SUBMIT}" = "false" ]; then
             SUBMIT_FLAG="false"
           fi
 
