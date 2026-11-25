@@ -1,0 +1,106 @@
+name: Release from Manifest
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Config/release-manifest.json'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: appstore-release-manifest
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate Manifest & Create Tag
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      tag: ${{ steps.check.outputs.tag }}
+      submit_for_review: ${{ steps.check.outputs.submit_for_review }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse manifest and create annotated tag
+        id: check
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re, subprocess, sys
+
+          manifest_path = pathlib.Path("Config/release-manifest.json")
+          data = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+          enabled = data.get("enabled") is True
+          raw_version = str(data.get("version") or "").strip()
+          version = raw_version.removeprefix("v")
+          notes = str(data.get("release_notes") or "").strip()
+          submit = data.get("submit_for_review", True) is not False
+
+          def write_out(pairs: dict[str, str]) -> None:
+              out = os.environ.get("GITHUB_OUTPUT")
+              if out:
+                  with open(out, "a", encoding="utf-8") as fh:
+                      for k, v in pairs.items():
+                          fh.write(f"{k}={v}\n")
+
+          if not enabled:
+              print("::notice::Config/release-manifest.json has enabled=false; skipping release.")
+              write_out({"should_release": "false"})
+              sys.exit(0)
+
+          if not re.fullmatch(r"[0-9]+(\.[0-9]+){1,2}", version):
+              print(f"::error::Invalid version '{raw_version}' in Config/release-manifest.json (expected X.Y or X.Y.Z).")
+              sys.exit(1)
+
+          if not notes:
+              print("::error::release_notes in Config/release-manifest.json cannot be empty when enabled=true.")
+              sys.exit(1)
+
+          if len(notes) > 4000:
+              print(f"::error::release_notes length ({len(notes)}) exceeds Apple's 4000-character limit.")
+              sys.exit(1)
+
+          tag = f"v{version}"
+          existing = subprocess.run(
+              ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"],
+              capture_output=True,
+              text=True,
+          )
+          if existing.returncode == 0:
+              print(f"::notice::Tag '{tag}' already exists; skipping duplicate manifest-triggered release.")
+              write_out({"should_release": "false"})
+              sys.exit(0)
+
+          notes_file = pathlib.Path(os.environ["RUNNER_TEMP"]) / "manifest_release_notes.txt"
+          notes_file.write_text(notes + "\n", encoding="utf-8")
+
+          subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
+          subprocess.run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], check=True)
+          subprocess.run(["git", "tag", "-a", tag, "-F", str(notes_file)], check=True)
+          subprocess.run(["git", "push", "origin", tag], check=True)
+
+          print(f"Created and pushed annotated tag {tag} (submit_for_review={submit})")
+          write_out({
+              "should_release": "true",
+              "tag": tag,
+              "submit_for_review": "true" if submit else "false",
+          })
+          PY
+
+  release:
+    name: Run App Store Release
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+      submit_for_review: ${{ needs.prepare.outputs.submit_for_review == 'true' }}
+    secrets: inherit
