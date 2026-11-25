@@ -7,12 +7,13 @@
 
 ## 1. 当前发布现状
 
-- **更新日期**：2026-11-24
+- **更新日期**：2026-11-25
 - **GitHub 仓库**：`qkunio/mooncode`（Public，GitHub Actions `macos-26` Runner 免费）
 - **Bundle ID**：`com.qinkun.kimicode`（不可变更）
 - **App Store 名称**：MoonCode - KimiCode远程控制客户端
 - **目标语言**：仅简体中文（`zh-Hans`）
 - **上架策略**：审核通过后自动上架（`AFTER_APPROVAL`）
+- **签名证书有效期**：`Apple Distribution` 证书有效期至 **2027-11-25**（到期前需重新导出 `.p12` 更新 Secret）
 - **当前线上 / 审核状态**：
   - App Store 版本 **`1.9`** 已手动提交审核中（所挂构建包为包内版本 `1.8` / Build `2`）。
   - 因为 `1.9` 已被占用，**下一版请直接从 `v1.10`（或 `v2.0`）开始打 Tag**；从下一版起，`Git Tag = 包内 MARKETING_VERSION = App Store 版本号` 将由 CI 自动强制对齐，构建号自动按 `YYYYMMDD.<run_number>` 递增。
@@ -26,9 +27,9 @@
 - [x] 实现本地打 Tag 辅助脚本（`scripts/release-tag.sh`）
 - [x] 本地离线校验（YAML / plist / XML / `pbxproj` 替换逻辑 / Mock API 单测）
 - [x] 将自动化配置文件 commit 并 push 到 `main`
-- [ ] 在 App Store Connect 生成 API Key（App 管理 / 管理权限）
-- [ ] 从本机钥匙串导出 `Apple Distribution` `.p12` 证书
-- [ ] 在 GitHub 仓库创建 `appstore-release` Environment 并填入 6 个 Secrets
+- [x] 在 App Store Connect 生成 API Key（App 管理 / 管理权限）
+- [x] 从本机钥匙串导出 `Apple Distribution` `.p12` 证书（已本地验证导入与序列号解析，有效期至 2027-11-25）
+- [x] 在 GitHub 仓库创建 `appstore-release` Environment 并填入全部 6 个 Secrets
 - [ ] 等 `1.9` 过审后，在 `v1.10` 完成首次云端联调（建议首次先 `submit_for_review=false` 验证一次）
 
 ---
