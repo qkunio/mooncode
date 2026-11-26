@@ -194,22 +194,20 @@ struct WelcomeView: View {
             .padding(.horizontal, 28)
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
-        .overlay(alignment: .topLeading) {
+        .toolbar {
             if step == .terminal || step == .desktop {
-                Button {
-                    go(to: .choose)
-                } label: {
-                    Image(systemName: "chevron.backward")
-                        .font(.body.weight(.semibold))
-                        .frame(width: 44, height: 44)
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        go(to: .choose)
+                    } label: {
+                        Label("返回", systemImage: "chevron.backward")
+                            .labelStyle(.iconOnly)
+                    }
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel("返回")
-                .padding(.leading, 16)
-                .transition(.opacity)
             }
         }
+        .toolbar(step == .terminal || step == .desktop ? .visible : .hidden, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
         .background {
             ZStack {
                 Color(.systemBackground)

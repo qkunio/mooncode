@@ -6,6 +6,7 @@ import SwiftUI
 struct SidebarView: View {
     let close: () -> Void
     let isVisible: Bool
+    let showsCloseButton: Bool
 
     @Environment(AppModel.self) private var app
     @Environment(\.colorScheme) private var colorScheme
@@ -89,6 +90,16 @@ struct SidebarView: View {
                 .frame(width: 30, height: 20)
             (Text("Moon").foregroundStyle(Palette.kimi) + Text(" Code"))
                 .font(.system(.title2, weight: .black))
+            if showsCloseButton {
+                Spacer(minLength: 8)
+                Button(action: close) {
+                    Label("关闭侧栏", systemImage: "xmark")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .frame(height: 44)
     }

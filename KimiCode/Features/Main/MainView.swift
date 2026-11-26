@@ -1,63 +1,34 @@
 import SwiftUI
 
-/// 主页 + 左侧抽屉。
+/// 紧凑宽度使用左侧抽屉；规则宽度同时显示侧栏和聊天。
 ///
-/// 侧栏从左边推进来，主页被推到右边、露出一截（原型图里右侧能看到 composer 的边）。
-/// 打开方式：左上角按钮，或在主页往右滑；点露出的主页或往左滑收起。
+/// 紧凑宽度下侧栏从左边推进来，主页被推到右边、露出一截；点露出的主页或往左滑收起。
+/// 窄规则宽度使用固定双栏，宽规则宽度使用系统分栏；两种布局都可以收起或恢复侧栏。
 struct MainView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var isSidebarOpen = false
     @State private var dragTranslation: CGFloat = 0
     @State private var isDraggingSidebar = false
+    @State private var columnVisibility = NavigationSplitViewVisibility.doubleColumn
+    @State private var isNarrowSidebarVisible = true
     @State private var isShowingUpdateNotice = false
 
     var body: some View {
-        GeometryReader { geometry in
-            let sidebarWidth = min(geometry.size.width * 0.84, 380)
-            // 坐标从安全区左边算起。横屏时刘海 / 灵动岛在左边，安全区左边有一截（约 60pt）：
-            // 收起的侧栏只挪开自身宽度的话，最右边那截会停在这里露出来，所以还得再多挪这么多。
-            let leadingInset = geometry.safeAreaInsets.leading
-            let progress = openProgress(sidebarWidth: sidebarWidth)
-
-            ZStack(alignment: .leading) {
-                NavigationStack {
-                    ChatScreen(openSidebar: { setSidebar(open: true, feedback: true) })
-                }
-                .offset(x: progress * sidebarWidth)
-                // NavigationStack 底层是 UIKit，`.offset` 只挪了画面，触摸仍按原位置命中 ——
-                // 抽屉开着时它底部的 composer 会抢走侧栏底部那一行的点击。所以开着时整页不接收触摸。
-                .allowsHitTesting(!isSidebarOpen)
-
-                // 露出的那截主页：变暗 + 点一下收起。
-                // 常驻而不是 `if` 插入：条件插入的视图在过渡中会被画到后面兄弟视图之上，
-                // 结果侧栏自己的按钮（退出登录等）点下去全落到这层，侧栏被收起。
-                Color.black
-                    .opacity(0.18 * progress)
-                    .ignoresSafeArea()
-                    .contentShape(.rect)
-                    .onTapGesture { setSidebar(open: false, feedback: true) }
-                    .allowsHitTesting(isSidebarOpen)
-                    .zIndex(1)
-
-                SidebarView(close: { setSidebar(open: false) }, isVisible: isSidebarOpen)
-                    .frame(width: sidebarWidth)
-                    .offset(x: (progress - 1) * (sidebarWidth + leadingInset))
-                    .zIndex(2)
+        Group {
+            if horizontalSizeClass == .regular {
+                regularLayout
+            } else {
+                compactLayout
             }
-            .scrollDisabled(isDraggingSidebar)
-            .gesture(SidebarPanGesture(
-                isOpen: isSidebarOpen,
-                onChanged: { translation in
-                    isDraggingSidebar = true
-                    dragTranslation = translation
-                },
-                onEnded: { translation, velocity in
-                    let projectedOffset = (isSidebarOpen ? sidebarWidth : 0)
-                        + translation + velocity * 0.2
-                    setSidebar(open: projectedOffset > sidebarWidth / 2, feedback: true)
-                },
-                onCancelled: { setSidebar(open: isSidebarOpen) }
-            ))
+        }
+        .onChange(of: horizontalSizeClass) { _, sizeClass in
+            isSidebarOpen = false
+            dragTranslation = 0
+            isDraggingSidebar = false
+            if sizeClass == .regular {
+                columnVisibility = .doubleColumn
+            }
         }
         .onChange(of: isSidebarOpen) { _, open in
             if open { Task { await model.refreshSidebar() } }
@@ -77,6 +48,138 @@ struct MainView: View {
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var regularLayout: some View {
+        GeometryReader { geometry in
+            Group {
+                if geometry.size.width < 720 {
+                    narrowRegularLayout(width: geometry.size.width)
+                } else {
+                    splitRegularLayout
+                }
+            }
+        }
+    }
+
+    private func narrowRegularLayout(width: CGFloat) -> some View {
+        let sidebarWidth = min(max(width * 0.36, 220), 260)
+        let detailWidth = isNarrowSidebarVisible ? width - sidebarWidth : width
+        return HStack(spacing: 0) {
+            if isNarrowSidebarVisible {
+                SidebarView(close: {}, isVisible: true, showsCloseButton: false)
+                    .frame(width: sidebarWidth)
+                    .frame(maxHeight: .infinity)
+                    .overlay(alignment: .trailing) { Divider() }
+                    .transition(.move(edge: .leading))
+            }
+
+            chatNavigation(
+                showsSidebarToggle: true,
+                isSidebarVisible: isNarrowSidebarVisible,
+                isAccessibilityHidden: false,
+                toggleSidebar: toggleNarrowSidebar
+            )
+            .frame(width: detailWidth)
+            .frame(maxHeight: .infinity)
+            .clipped()
+        }
+        .animation(.smooth(duration: 0.25), value: isNarrowSidebarVisible)
+    }
+
+    private var splitRegularLayout: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            SidebarView(close: {}, isVisible: columnVisibility != .detailOnly, showsCloseButton: false)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+        } detail: {
+            chatNavigation(
+                showsSidebarToggle: false,
+                isSidebarVisible: columnVisibility != .detailOnly,
+                isAccessibilityHidden: false,
+                toggleSidebar: {}
+            )
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    private var compactLayout: some View {
+        GeometryReader { geometry in
+            let sidebarWidth = min(geometry.size.width * 0.84, 380)
+            // 坐标从安全区左边算起。横屏时刘海 / 灵动岛在左边，安全区左边有一截（约 60pt）：
+            // 收起的侧栏只挪开自身宽度的话，最右边那截会停在这里露出来，所以还得再多挪这么多。
+            let leadingInset = geometry.safeAreaInsets.leading
+            let progress = openProgress(sidebarWidth: sidebarWidth)
+
+            ZStack(alignment: .leading) {
+                chatNavigation(
+                    showsSidebarToggle: true,
+                    isSidebarVisible: false,
+                    isAccessibilityHidden: isSidebarOpen,
+                    toggleSidebar: { setSidebar(open: true, feedback: true) }
+                )
+                .offset(x: progress * sidebarWidth)
+                // NavigationStack 底层是 UIKit，`.offset` 只挪了画面，触摸仍按原位置命中 ——
+                // 抽屉开着时它底部的 composer 会抢走侧栏底部那一行的点击。所以开着时整页不接收触摸。
+                .allowsHitTesting(!isSidebarOpen)
+
+                // 露出的那截主页：变暗 + 点一下收起。
+                // 常驻而不是 `if` 插入：条件插入的视图在过渡中会被画到后面兄弟视图之上，
+                // 结果侧栏自己的按钮（退出登录等）点下去全落到这层，侧栏被收起。
+                Color.black
+                    .opacity(0.18 * progress)
+                    .ignoresSafeArea()
+                    .contentShape(.rect)
+                    .onTapGesture { setSidebar(open: false, feedback: true) }
+                    .allowsHitTesting(isSidebarOpen)
+                    .zIndex(1)
+
+                SidebarView(
+                    close: { setSidebar(open: false) },
+                    isVisible: isSidebarOpen,
+                    showsCloseButton: true
+                )
+                .frame(width: sidebarWidth)
+                .offset(x: (progress - 1) * (sidebarWidth + leadingInset))
+                .accessibilityAddTraits(isSidebarOpen ? .isModal : [])
+                .zIndex(2)
+            }
+            .scrollDisabled(isDraggingSidebar)
+            .gesture(SidebarPanGesture(
+                isOpen: isSidebarOpen,
+                onChanged: { translation in
+                    isDraggingSidebar = true
+                    dragTranslation = translation
+                },
+                onEnded: { translation, velocity in
+                    let projectedOffset = (isSidebarOpen ? sidebarWidth : 0)
+                        + translation + velocity * 0.2
+                    setSidebar(open: projectedOffset > sidebarWidth / 2, feedback: true)
+                },
+                onCancelled: { setSidebar(open: isSidebarOpen) }
+            ))
+        }
+    }
+
+    private func chatNavigation(
+        showsSidebarToggle: Bool,
+        isSidebarVisible: Bool,
+        isAccessibilityHidden: Bool,
+        toggleSidebar: @escaping () -> Void
+    ) -> some View {
+        NavigationStack {
+            ChatScreen(
+                showsSidebarToggle: showsSidebarToggle,
+                isSidebarVisible: isSidebarVisible,
+                isAccessibilityHidden: isAccessibilityHidden,
+                toggleSidebar: toggleSidebar
+            )
+        }
+    }
+
+    private func toggleNarrowSidebar() {
+        withAnimation(.smooth(duration: 0.25)) {
+            isNarrowSidebarVisible.toggle()
         }
     }
 
