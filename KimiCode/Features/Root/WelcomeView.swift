@@ -153,7 +153,7 @@ struct WelcomeView: View {
                                 Text(auth.isSigningIn ? "正在登录…" : "正在准备…")
                             } else {
                                 Text(buttonTitle)
-                                Image(systemName: "arrow.right")
+                                MoonIcon("mc-arrow-right", size: 18)
                             }
                         }
                         .font(.body.weight(.semibold))
@@ -199,8 +199,7 @@ struct WelcomeView: View {
                 Button {
                     go(to: .choose)
                 } label: {
-                    Image(systemName: "chevron.backward")
-                        .font(.body.weight(.semibold))
+                    MoonIcon("mc-chevron-left", size: 18)
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.glass)
@@ -354,8 +353,7 @@ struct WelcomeView: View {
                     .accessibilityHidden(true)
                 Text(title).font(.body.weight(.semibold))
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.forward")
-                    .font(.footnote.weight(.semibold))
+                MoonIcon("mc-chevron-right", size: 13)
                     .foregroundStyle(.tertiary)
             }
             .foregroundStyle(.primary)

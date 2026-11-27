@@ -254,7 +254,7 @@ struct UserTurnView: View {
                         } label: {
                             HStack(spacing: 2) {
                                 Text(expanded ? "收起" : "展开")
-                                Image(systemName: "chevron.down")
+                                MoonIcon("mc-chevron-down", size: 13)
                                     .rotationEffect(.degrees(expanded ? 180 : 0))
                             }
                             .font(.subheadline)
@@ -298,8 +298,7 @@ struct UserTurnView: View {
             }
             if canUndo {
                 Button(action: undo) {
-                    Image(systemName: "arrow.uturn.backward")
-                        .font(.footnote)
+                    MoonIcon("mc-undo", size: 15)
                         .foregroundStyle(.secondary)
                         .frame(width: 28, height: 28)
                         .contentShape(.rect)
@@ -343,7 +342,11 @@ private struct FlowAttachments: View {
     }
 
     private func chip(_ attachment: AttachmentRef) -> some View {
-        Label(attachment.name, systemImage: attachment.isImage ? "photo" : "doc")
+        Label {
+            Text(attachment.name)
+        } icon: {
+            MoonIcon(attachment.isImage ? "mc-photo" : "mc-file-preview", size: 15)
+        }
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .lineLimit(1)
@@ -411,7 +414,11 @@ private struct OptimisticPromptRow: View {
 
             if prompt.failed {
                 HStack(spacing: 12) {
-                    Label("没发出去", systemImage: "exclamationmark.circle")
+                    Label {
+                        Text("没发出去")
+                    } icon: {
+                        MoonIcon("mc-alert-circle", size: 15)
+                    }
                         .foregroundStyle(Palette.danger)
                     Button("重试", action: retry)
                     Button("丢弃", action: discard).foregroundStyle(.secondary)
@@ -791,26 +798,13 @@ struct ThinkingBlockView: View {
     }
 }
 
-/// 涂鸦线图标。在思考时用 iOS 26 的 Draw 效果一笔画出来、再擦掉，循环；思考完停在画好的样子。
+/// 月球思考图标：思考中循环播放满月 → 半月 → 月全食 → 半月 → 满月动效；思考完停在满月月球。
 private struct ThinkingIcon: View {
     let animating: Bool
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var erased = false
-
     var body: some View {
-        Image(systemName: "scribble.variable")
-            .symbolEffect(.drawOff, isActive: animating && !reduceMotion && erased)
-            .font(.footnote)
+        ThinkingMoonView(animating: animating, size: 15)
             .frame(width: 20)
-            .task(id: animating && !reduceMotion) {
-                erased = false
-                guard animating, !reduceMotion else { return }
-                while true {
-                    do { try await Task.sleep(for: .seconds(1.6)) } catch { return }
-                    erased.toggle()
-                }
-            }
     }
 }
 
@@ -902,8 +896,7 @@ private struct ThinkingDetailSheet: View {
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .overlay(alignment: .leading) {
                     Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.body.weight(.semibold))
+                        MoonIcon("mc-close", size: 18)
                             .foregroundStyle(.primary)
                             .frame(width: 44, height: 44)
                             .contentShape(.circle)
@@ -973,8 +966,7 @@ struct ToolLineView: View {
                 withAnimation(.disclosure) { ui.set(key, !open) }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: ToolNames.symbol(tool.name))
-                        .font(.footnote)
+                    MoonIcon(ToolNames.symbol(tool.name), size: 15)
                         .frame(width: 20)
                     headline(open: open)
                     if expandable { Chevron(open: open) }
@@ -1070,9 +1062,9 @@ struct ToolLineView: View {
         case .running:
             ProgressView().controlSize(.mini)
         case .error:
-            Image(systemName: "xmark").font(.caption.weight(.semibold)).foregroundStyle(Palette.danger)
+            MoonIcon("mc-close", size: 12).foregroundStyle(Palette.danger)
         case .cancelled:
-            Image(systemName: "xmark").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            MoonIcon("mc-close", size: 12).foregroundStyle(.tertiary)
         case .ok:
             EmptyView()
         }
@@ -1332,8 +1324,7 @@ struct Chevron: View {
     let open: Bool
 
     var body: some View {
-        Image(systemName: "chevron.right")
-            .font(.caption2.weight(.semibold))
+        MoonIcon("mc-chevron-right", size: 11)
             .foregroundStyle(.tertiary)
             .rotationEffect(.degrees(open ? 90 : 0))
     }
@@ -1363,8 +1354,7 @@ private struct NotificationRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: failed ? "exclamationmark.triangle" : "bell")
-                .font(.footnote)
+            MoonIcon(failed ? "mc-alert-triangle" : "mc-bell", size: 15)
                 .foregroundStyle(failed ? AnyShapeStyle(Palette.danger) : AnyShapeStyle(.secondary))
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
@@ -1464,8 +1454,7 @@ private struct TurnFailedCard: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.footnote)
+            MoonIcon("mc-alert-triangle", size: 15)
                 .foregroundStyle(Palette.danger)
             VStack(alignment: .leading, spacing: 2) {
                 Text(maxSteps ? "达到本轮步数上限，对话已中断" : "模型请求失败，本轮对话已中断")

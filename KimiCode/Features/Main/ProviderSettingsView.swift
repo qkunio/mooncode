@@ -36,10 +36,14 @@ struct ProviderSettingsSheet: View {
                     }
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
-                            Button("从目录添加", systemImage: "books.vertical") { path.append(.catalog) }
-                            Button("手动添加", systemImage: "square.and.pencil") { path.append(.add) }
+                            Button { path.append(.catalog) } label: {
+                                Label("从目录添加", image: "mc-catalog")
+                            }
+                            Button { path.append(.add) } label: {
+                                Label("手动添加", image: "mc-compose")
+                            }
                         } label: {
-                            Label("添加供应商", systemImage: "plus")
+                            Label("添加供应商", image: "mc-plus")
                         }
                     }
                 }
@@ -106,7 +110,11 @@ struct ProviderSettingsSheet: View {
             .refreshable { await load() }
         } else if let loadError {
             ContentUnavailableView {
-                Label("无法读取供应商", systemImage: "exclamationmark.triangle")
+                Label {
+                    Text("无法读取供应商")
+                } icon: {
+                    MoonIcon("mc-alert-triangle", size: 42)
+                }
             } description: {
                 Text(loadError)
             } actions: {
@@ -140,9 +148,13 @@ struct ProviderSettingsSheet: View {
         }
         .swipeActions(edge: .trailing) {
             if !provider.isManaged {
-                Button("删除", systemImage: "trash", role: .destructive) { pendingDelete = provider }
+                Button(role: .destructive) { pendingDelete = provider } label: {
+                    Label("删除", image: "mc-trash")
+                }
             }
-            Button("刷新", systemImage: "arrow.clockwise") { Task { await refresh(provider) } }
+            Button { Task { await refresh(provider) } } label: {
+                Label("刷新", image: "mc-refresh")
+            }
                 .tint(.blue)
         }
     }
@@ -293,7 +305,7 @@ struct DefaultPermissionOptions: View {
                     Text(option.title)
                     Text(option.subtitle)
                 } icon: {
-                    Image(systemName: option.symbolName)
+                    Image(option.symbolName)
                 }
                 .tag(option)
             }
@@ -334,10 +346,9 @@ private struct DefaultsSettingsView: View {
                         }
                     } label: {
                         HStack(spacing: 6) {
-                            Image(systemName: mode.symbolName)
+                            MoonIcon(mode.symbolName, size: 17)
                             Text(mode.title)
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.footnote.weight(.semibold))
+                            MoonIcon("mc-chevron-up-down", size: 13)
                         }
                         .foregroundStyle(Color(.secondaryLabel))
                     }
@@ -439,8 +450,7 @@ struct DefaultModelList: View {
                                     .foregroundStyle(.primary)
                                 Spacer()
                                 if model.model == selected {
-                                    Image(systemName: "checkmark")
-                                        .font(.body.weight(.semibold))
+                                    MoonIcon("mc-check", size: 16)
                                         .foregroundStyle(Palette.kimi)
                                 }
                             }
@@ -634,7 +644,7 @@ private struct ProviderEditView: View {
                     Button {
                         showsKey.toggle()
                     } label: {
-                        Image(systemName: showsKey ? "eye.slash" : "eye")
+                        MoonIcon(showsKey ? "mc-eye-off" : "mc-eye", size: 18)
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
@@ -662,10 +672,12 @@ private struct ProviderEditView: View {
                     guard form.models.count - offsets.count >= 1 else { return }
                     form.models.remove(atOffsets: offsets)
                 }
-                Button("添加模型", systemImage: "plus") {
+                Button {
                     let draft = ModelDraft()
                     form.models.append(draft)
                     editingModelID = draft.id
+                } label: {
+                    Label("添加模型", image: "mc-plus")
                 }
             } header: {
                 Text("模型")
@@ -902,8 +914,7 @@ private struct CatalogListView: View {
                                 }
                                 Spacer(minLength: 8)
                                 if !item.rejected {
-                                    Image(systemName: "chevron.forward")
-                                        .font(.footnote.weight(.semibold))
+                                    MoonIcon("mc-chevron-right", size: 13)
                                         .foregroundStyle(.tertiary)
                                 }
                             }
@@ -919,7 +930,11 @@ private struct CatalogListView: View {
                 .searchable(text: $query, prompt: "搜索供应商")
             } else if let loadError {
                 ContentUnavailableView {
-                    Label("目录加载失败", systemImage: "wifi.exclamationmark")
+                    Label {
+                        Text("目录加载失败")
+                    } icon: {
+                        MoonIcon("mc-wifi-alert", size: 42)
+                    }
                 } description: {
                     Text(loadError)
                 } actions: {
@@ -1003,7 +1018,7 @@ private struct CatalogImportView: View {
                     Button {
                         showsKey.toggle()
                     } label: {
-                        Image(systemName: showsKey ? "eye.slash" : "eye")
+                        MoonIcon(showsKey ? "mc-eye-off" : "mc-eye", size: 18)
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)

@@ -335,10 +335,12 @@ private struct MarkdownTable: View {
         .contentShape(.contextMenuPreview, .rect(cornerRadius: 8))
         // 表格不进正文的连续选区，长按弹系统菜单整张拷贝（制表符分列，粘到表格软件里也能对上）。
         .contextMenu {
-            Button("拷贝", systemImage: "doc.on.doc") {
+            Button {
                 UIPasteboard.general.string = rows.map { row in
                     row.map { String(MarkdownText.inline($0).characters) }.joined(separator: "\t")
                 }.joined(separator: "\n")
+            } label: {
+                Label("拷贝", image: "mc-copy")
             }
         }
     }
@@ -394,8 +396,7 @@ struct CopyButton: View {
                 copied = false
             }
         } label: {
-            Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                .font(.footnote)
+            MoonIcon(copied ? "mc-check" : "mc-copy", size: 15)
                 .foregroundStyle(.secondary)
                 .frame(width: 28, height: 28)
                 .contentShape(.rect)

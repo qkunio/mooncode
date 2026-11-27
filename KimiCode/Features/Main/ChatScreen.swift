@@ -76,7 +76,7 @@ struct ChatScreen: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button(action: openSidebar) {
-                    Label("打开侧栏", systemImage: "line.3.horizontal")
+                    Label("打开侧栏", image: "mc-menu")
                 }
             }
             if let chat = app.chat {
@@ -108,7 +108,11 @@ struct ChatScreen: View {
                 .allowsHitTesting(false)
         } else if app.isCompatibilityError {
             ContentUnavailableView {
-                Label("版本暂未兼容", systemImage: "exclamationmark.triangle")
+                Label {
+                    Text("版本暂未兼容")
+                } icon: {
+                    MoonIcon("mc-alert-triangle", size: 42)
+                }
             } description: {
                 Text(KapError.protocolMismatchMessage)
             } actions: {
@@ -127,7 +131,11 @@ struct ChatScreen: View {
             }
         } else if app.onlineDevices.isEmpty {
             ContentUnavailableView {
-                Label("没有在线的设备", systemImage: "laptopcomputer.slash")
+                Label {
+                    Text("没有在线的设备")
+                } icon: {
+                    MoonIcon("mc-device-offline", size: 42)
+                }
             } description: {
                 Text("在电脑上运行 `kimi rc`，它就会出现在这里。")
             } actions: {

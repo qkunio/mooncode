@@ -1,0 +1,501 @@
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="mc-add-to-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 4.5h12A2.5 2.5 0 0 1 20.5 7v8a2.5 2.5 0 0 1-2.5 2.5h-7.2L7 20.5v-3H6A2.5 2.5 0 0 1 3.5 15V7A2.5 2.5 0 0 1 6 4.5Z" />
+    <path d="M12 8.5v5" />
+    <path d="M9.5 11h5" />
+  </symbol>
+  <symbol id="mc-add-workspace" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12.5 19.5h-7A2.5 2.5 0 0 1 3 17V7a2.5 2.5 0 0 1 2.5-2.5h3c.6 0 1.2.3 1.55.8l.9 1.3c.35.5.95.8 1.55.8h6A2.5 2.5 0 0 1 21 9.9v2.3" />
+    <path d="M18 14.5v6" />
+    <path d="M15 17.5h6" />
+  </symbol>
+  <symbol id="mc-alert-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7.8v5" />
+    <circle cx="12" cy="16" r="0.95" fill="currentColor" stroke="none" />
+  </symbol>
+  <symbol id="mc-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10.4 4.5L3.3 17a1.8 1.8 0 0 0 1.6 2.7h14.2a1.8 1.8 0 0 0 1.6-2.7L13.6 4.5a1.8 1.8 0 0 0-3.2 0Z" />
+    <path d="M12 9.5v4.2" />
+    <circle cx="12" cy="16.5" r="0.95" fill="currentColor" stroke="none" />
+  </symbol>
+  <symbol id="mc-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4.5 12h15" />
+    <path d="M13.5 6l6 6-6 6" />
+  </symbol>
+  <symbol id="mc-arrow-up-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6.5 17.5l11-11" />
+    <path d="M8.5 6.5h9v9" />
+  </symbol>
+  <symbol id="mc-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 19.5v-15" />
+    <path d="M6 10.5l6-6 6 6" />
+  </symbol>
+  <symbol id="mc-audio" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 10.5v3" />
+    <path d="M8 7.5v9" />
+    <path d="M12 4v16" />
+    <path d="M16 7.5v9" />
+    <path d="M20 10.5v3" />
+  </symbol>
+  <symbol id="mc-battery" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.5" y="7" width="16.5" height="10" rx="2.2" />
+    <path d="M21.5 10v4" />
+    <rect x="5.5" y="10" width="10.5" height="4" rx="0.8" fill="currentColor" stroke="none" />
+  </symbol>
+  <symbol id="mc-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 15.5V10a6 6 0 1 0-12 0v5.5L4.2 17.5h15.6L18 15.5Z" />
+    <path d="M9.8 17.5a2.2 2.2 0 0 0 4.4 0" />
+  </symbol>
+  <symbol id="mc-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3.5" y="4.5" width="17" height="16" rx="2.5" />
+    <path d="M8 2.8v3.4" />
+    <path d="M16 2.8v3.4" />
+    <path d="M3.5 9.5h17" />
+    <circle cx="8" cy="13.2" r="0.85" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="13.2" r="0.85" fill="currentColor" stroke="none" />
+    <circle cx="16" cy="13.2" r="0.85" fill="currentColor" stroke="none" />
+    <circle cx="8" cy="16.8" r="0.85" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="16.8" r="0.85" fill="currentColor" stroke="none" />
+    <circle cx="16" cy="16.8" r="0.85" fill="currentColor" stroke="none" />
+  </symbol>
+  <symbol id="mc-catalog" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3.5" y="4.5" width="4.2" height="15" rx="1" />
+    <rect x="7.7" y="4.5" width="4.2" height="15" rx="1" />
+    <path d="M12.6 5.2l3.9-1a1 1 0 0 1 1.2.7l3.2 12.6a1 1 0 0 1-.7 1.2l-3.9 1a1 1 0 0 1-1.2-.7L11.9 6.4a1 1 0 0 1 .7-1.2Z" />
+    <path d="M3.5 8h8.4" />
+    <path d="M13.1 8.5l4.2-1.1" />
+  </symbol>
+  <symbol id="mc-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M8.5 12.3l2.3 2.3 4.8-5" />
+  </symbol>
+  <symbol id="mc-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4.8 12.6l4.6 4.6 9.8-10" />
+  </symbol>
+  <symbol id="mc-checklist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 8.2l1.8 1.8L9 6.5" />
+    <path d="M12.5 8.2H20" />
+    <path d="M4 15.8l1.8 1.8L9 14.1" />
+    <path d="M12.5 15.8H20" />
+  </symbol>
+  <symbol id="mc-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5.5 9L12 15.5 18.5 9" />
+  </symbol>
+  <symbol id="mc-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 5.5L8.5 12l6.5 6.5" />
+  </symbol>
+  <symbol id="mc-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 5.5L15.5 12 9 18.5" />
+  </symbol>
+  <symbol id="mc-chevron-up-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 9.2L12 5.2l4 4" />
+    <path d="M8 14.8l4 4 4-4" />
+  </symbol>
+  <symbol id="mc-chevron-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5.5 15L12 8.5l6.5 6.5" />
+  </symbol>
+  <symbol id="mc-circle-dotted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" stroke-dasharray="3.2 3.87" />
+  </symbol>
+  <symbol id="mc-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+  </symbol>
+  <symbol id="mc-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7.2V12l3.4 2.4" />
+  </symbol>
+  <symbol id="mc-close-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.2 9.2l5.6 5.6" />
+    <path d="M14.8 9.2l-5.6 5.6" />
+  </symbol>
+  <symbol id="mc-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 6l12 12" />
+    <path d="M18 6L6 18" />
+  </symbol>
+  <symbol id="mc-code-brackets" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 7.5L3.5 12 8 16.5" />
+    <path d="M16 7.5l4.5 4.5-4.5 4.5" />
+    <path d="M13.8 5.5l-3.6 13" />
+  </symbol>
+  <symbol id="mc-code-diff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3.5" y="3.5" width="17" height="17" rx="3.2" />
+    <path d="M12 7v5" />
+    <path d="M9.5 9.5h5" />
+    <path d="M9.5 15.75h5" />
+  </symbol>
+  <symbol id="mc-compose" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11.5 4.5H6.5A2.5 2.5 0 0 0 4 7v10.5A2.5 2.5 0 0 0 6.5 20H17a2.5 2.5 0 0 0 2.5-2.5v-5" />
+    <path d="M17.2 3.8a2 2 0 0 1 2.8 2.8l-7.8 7.8-3.4.9.9-3.4 7.5-8.1Z" />
+  </symbol>
+  <symbol id="mc-config-braces" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8.5 4.5C6.8 4.5 6 5.5 6 7v2.8c0 1.2-.8 2.2-2 2.2 1.2 0 2 1 2 2.2V17c0 1.5.8 2.5 2.5 2.5" />
+    <path d="M15.5 4.5c1.7 0 2.5 1 2.5 2.5v2.8c0 1.2.8 2.2 2 2.2-1.2 0-2 1-2 2.2V17c0 1.5-.8 2.5-2.5 2.5" />
+  </symbol>
+  <symbol id="mc-context-usage" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="12" r="4.5" />
+    <path d="M12 3v4.5" />
+    <path d="M8.82 15.18L5.64 18.36" />
+  </symbol>
+  <symbol id="mc-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="9" y="8.5" width="11" height="12.5" rx="2.2" />
+    <path d="M15 8.5V6a2.2 2.2 0 0 0-2.2-2.2H6.2A2.2 2.2 0 0 0 4 6v8.8A2.2 2.2 0 0 0 6.2 17H9" />
+  </symbol>
+  <symbol id="mc-cursor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5.5 4l4.6 15 2.5-4.6 4.4 4.4 2-2-4.4-4.4L19.2 9.8 5.5 4Z" />
+  </symbol>
+  <symbol id="mc-desktop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="4" width="18" height="12.5" rx="2.2" />
+    <path d="M3 13.5h18" />
+    <path d="M9.5 16.5l-.8 3.5" />
+    <path d="M14.5 16.5l.8 3.5" />
+    <path d="M7.5 20h9" />
+  </symbol>
+  <symbol id="mc-device-offline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17.2 4.5H6a2 2 0 0 0-2 2v9.5h2.5" />
+    <path d="M10.8 16H20V9" />
+    <path d="M2.5 19.5h4.2" />
+    <path d="M10.5 19.5h11" />
+    <path d="M3.5 20.5l17-17" />
+  </symbol>
+  <symbol id="mc-device" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="4" y="4.5" width="16" height="11.5" rx="2" />
+    <path d="M2.5 19.5h19" />
+  </symbol>
+  <symbol id="mc-download-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 8v7.5" />
+    <path d="M8.8 12.5L12 15.7l3.2-3.2" />
+  </symbol>
+  <symbol id="mc-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16.5 4.2a2.2 2.2 0 0 1 3.1 3.1L8.4 18.5 4 19.8l1.3-4.4L16.5 4.2Z" />
+    <path d="M14.4 6.3l3.1 3.1" />
+  </symbol>
+  <symbol id="mc-external-drive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3.5 13.5l2-6.8A2.2 2.2 0 0 1 7.6 5h8.8a2.2 2.2 0 0 1 2.1 1.7l2 6.8" />
+    <rect x="3.5" y="13.5" width="17" height="6" rx="2" />
+    <path d="M15.5 16.5h2" />
+  </symbol>
+  <symbol id="mc-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9.8 6.1A9.8 9.8 0 0 1 12 5.8c5.9 0 9.5 6.2 9.5 6.2a16.8 16.8 0 0 1-3.3 3.9" />
+    <path d="M14.2 17.9a9.8 9.8 0 0 1-2.2.3c-5.9 0-9.5-6.2-9.5-6.2a16.8 16.8 0 0 1 3.5-4.1" />
+    <path d="M10.1 10.1a2.7 2.7 0 0 0 3.8 3.8" />
+    <path d="M3.5 20.5l17-17" />
+  </symbol>
+  <symbol id="mc-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2.5 12s3.6-6.2 9.5-6.2S21.5 12 21.5 12s-3.6 6.2-9.5 6.2S2.5 12 2.5 12Z" />
+    <circle cx="12" cy="12" r="2.8" />
+  </symbol>
+  <symbol id="mc-file-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 3H7a2.5 2.5 0 0 0-2.5 2.5v13A2.5 2.5 0 0 0 7 21h10a2.5 2.5 0 0 0 2.5-2.5V8.5L14 3Z" />
+    <path d="M14 3v3.5a2 2 0 0 0 2 2h3.5" />
+    <path d="M12 11.5v5.5" />
+    <path d="M9.25 14.25h5.5" />
+  </symbol>
+  <symbol id="mc-file-preview" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 3H7a2.5 2.5 0 0 0-2.5 2.5v13A2.5 2.5 0 0 0 7 21h10a2.5 2.5 0 0 0 2.5-2.5V8.5L14 3Z" />
+    <path d="M14 3v3.5a2 2 0 0 0 2 2h3.5" />
+    <path d="M8.5 13h7" />
+    <path d="M8.5 16.5h4.5" />
+  </symbol>
+  <symbol id="mc-file-rich" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 3H7a2.5 2.5 0 0 0-2.5 2.5v13A2.5 2.5 0 0 0 7 21h10a2.5 2.5 0 0 0 2.5-2.5V8.5L14 3Z" />
+    <path d="M14 3v3.5a2 2 0 0 0 2 2h3.5" />
+    <rect x="7.8" y="10.8" width="3.6" height="3.6" rx="0.7" />
+    <path d="M13.8 11.2h2.4" />
+    <path d="M13.8 14.2h2.4" />
+    <path d="M7.8 17.4h8.4" />
+  </symbol>
+  <symbol id="mc-file-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 3H7a2.5 2.5 0 0 0-2.5 2.5v13A2.5 2.5 0 0 0 7 21h10a2.5 2.5 0 0 0 2.5-2.5V8.5L14 3Z" />
+    <path d="M14 3v3.5a2 2 0 0 0 2 2h3.5" />
+    <circle cx="11.3" cy="13.8" r="2.6" />
+    <path d="M13.2 15.7l2 2" />
+  </symbol>
+  <symbol id="mc-file-zip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 3H7a2.5 2.5 0 0 0-2.5 2.5v13A2.5 2.5 0 0 0 7 21h10a2.5 2.5 0 0 0 2.5-2.5V8.5L14 3Z" />
+    <path d="M14 3v3.5a2 2 0 0 0 2 2h3.5" />
+    <path d="M10.5 6.5h1" />
+    <path d="M10.5 9.5h1" />
+    <path d="M10.5 12.5h1" />
+    <rect x="9.5" y="15" width="3" height="3.2" rx="0.8" />
+  </symbol>
+  <symbol id="mc-folder-unknown" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 7a2.5 2.5 0 0 1 2.5-2.5h3c.6 0 1.2.3 1.55.8l.9 1.3c.35.5.95.8 1.55.8h6A2.5 2.5 0 0 1 21 9.9V17a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17V7Z" />
+    <path d="M10.4 11.2a1.7 1.7 0 1 1 2.7 1.4c-.6.4-1.1.7-1.1 1.4" />
+    <circle cx="12" cy="16.5" r="0.85" fill="currentColor" stroke="none" />
+  </symbol>
+  <symbol id="mc-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18" />
+    <path d="M12 3c-3 3-3 15 0 18" />
+    <path d="M12 3c3 3 3 15 0 18" />
+  </symbol>
+  <symbol id="mc-goal-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="12" r="5.2" />
+    <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+  </symbol>
+  <symbol id="mc-info-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="8.2" r="0.95" fill="currentColor" stroke="none" />
+    <path d="M12 11.4v4.8" />
+  </symbol>
+  <symbol id="mc-kimi-cli" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="8.8" />
+    <path d="M6.11 5.46L20.61 10.17" />
+    <path d="M3.63 9.28L20.37 14.72" />
+    <path d="M3.39 13.83L17.89 18.54" />
+  </symbol>
+  <symbol id="mc-kimi-desktop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6.2 12.6v-1.8a5.8 5.8 0 0 1 11.6 0v1.8" />
+    <path d="M10.3 8.5v2.2" />
+    <path d="M13.7 8.5v2.2" />
+    <rect x="3" y="12.8" width="18" height="7.7" rx="2.5" />
+    <path d="M6.6 15.4l1.5 1.3-1.5 1.3" />
+    <path d="M10.2 18h2.6" />
+  </symbol>
+  <symbol id="mc-list-bullet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="5" cy="7" r="1.1" fill="currentColor" stroke="none" />
+    <path d="M9.5 7H20" />
+    <circle cx="5" cy="12" r="1.1" fill="currentColor" stroke="none" />
+    <path d="M9.5 12H20" />
+    <circle cx="5" cy="17" r="1.1" fill="currentColor" stroke="none" />
+    <path d="M9.5 17H20" />
+  </symbol>
+  <symbol id="mc-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="5" y="10.5" width="14" height="10" rx="2.5" />
+    <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+  </symbol>
+  <symbol id="mc-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11 4H6.5A2.5 2.5 0 0 0 4 6.5v11A2.5 2.5 0 0 0 6.5 20H11" />
+    <path d="M10 12h10" />
+    <path d="M16.2 8.2L20 12l-3.8 3.8" />
+  </symbol>
+  <symbol id="mc-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 6.5h16" />
+    <path d="M4 12h16" />
+    <path d="M4 17.5h16" />
+  </symbol>
+  <symbol id="mc-model" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9L12 3Z" />
+    <path d="M4.2 7.5L12 12l7.8-4.5" />
+    <path d="M12 12v9" />
+  </symbol>
+  <symbol id="mc-mooncode-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.5" y="5.5" width="19" height="13" rx="3" />
+    <path d="M12.2 9.8v2.6" />
+    <path d="M16.7 9.8v2.6" />
+  </symbol>
+  <symbol id="mc-more-horizontal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="5.5" cy="12" r="1.4" />
+    <circle cx="12" cy="12" r="1.4" />
+    <circle cx="18.5" cy="12" r="1.4" />
+  </symbol>
+  <symbol id="mc-permission-ask" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 3l7.2 2.7a1.2 1.2 0 0 1 .8 1.1v4.6c0 4.6-3.2 7.8-8 9.6-4.8-1.8-8-5-8-9.6V6.8a1.2 1.2 0 0 1 .8-1.1L12 3Z" />
+    <path d="M8.8 12.2l2.2 2.2 4.4-4.6" />
+  </symbol>
+  <symbol id="mc-permission-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 3l7.2 2.7a1.2 1.2 0 0 1 .8 1.1v4.6c0 4.6-3.2 7.8-8 9.6-4.8-1.8-8-5-8-9.6V6.8a1.2 1.2 0 0 1 .8-1.1L12 3Z" />
+    <path d="M12.6 7.4L9 12.3h3l-.6 4.3 3.6-4.9h-3l.6-4.3Z" />
+  </symbol>
+  <symbol id="mc-permission-manual" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18.2 12.2a1.3 1.3 0 0 0-2.1-.6l-.9 1.1V6.5a1.3 1.3 0 0 0-2.6 0v4.3V4.8a1.3 1.3 0 0 0-2.6 0v6V6.2a1.3 1.3 0 0 0-2.6 0v5.5V8.8a1.3 1.3 0 0 0-2.6 0v6.4c0 3.4 2.5 5.8 6 5.8 2.8 0 5-1.5 6.2-4.2l1.4-3.1a1.3 1.3 0 0 0-.2-1.5Z" />
+  </symbol>
+  <symbol id="mc-photo-error" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 20.5H5.5A2.5 2.5 0 0 1 3 18V6a2.5 2.5 0 0 1 2.5-2.5h12A2.5 2.5 0 0 1 20 6v5.5" />
+    <circle cx="8.2" cy="8.2" r="1.4" />
+    <path d="M3.5 17.5l4.4-4.2a1.3 1.3 0 0 1 1.9 0l2.5 2.5" />
+    <path d="M18.5 14v3.2" />
+    <circle cx="18.5" cy="19.8" r="0.95" fill="currentColor" stroke="none" />
+  </symbol>
+  <symbol id="mc-photo-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12.5 20.5H5.5A2.5 2.5 0 0 1 3 18V6a2.5 2.5 0 0 1 2.5-2.5h12A2.5 2.5 0 0 1 20 6v5.8" />
+    <circle cx="8.2" cy="8.2" r="1.4" />
+    <path d="M3.5 17.5l4.4-4.2a1.3 1.3 0 0 1 1.9 0l2.4 2.4" />
+    <path d="M17.5 14v6" />
+    <path d="M15 17.5l2.5 2.5 2.5-2.5" />
+  </symbol>
+  <symbol id="mc-photo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3.5" width="18" height="17" rx="2.5" />
+    <circle cx="8.2" cy="8.2" r="1.4" />
+    <path d="M3.5 17.8l4.5-4.3a1.4 1.4 0 0 1 2 0l2.2 2.2" />
+    <path d="M11 16.5l3.3-3.5a1.4 1.4 0 0 1 2 0l4.2 4.2" />
+  </symbol>
+  <symbol id="mc-plus-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 8v8" />
+    <path d="M8 12h8" />
+  </symbol>
+  <symbol id="mc-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 4.5v15" />
+    <path d="M4.5 12h15" />
+  </symbol>
+  <symbol id="mc-qr-code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="7" height="7" rx="1.4" />
+    <rect x="14" y="3" width="7" height="7" rx="1.4" />
+    <rect x="3" y="14" width="7" height="7" rx="1.4" />
+    <rect x="5.5" y="5.5" width="2" height="2" rx="0.4" fill="currentColor" stroke="none" />
+    <rect x="16.5" y="5.5" width="2" height="2" rx="0.4" fill="currentColor" stroke="none" />
+    <rect x="5.5" y="16.5" width="2" height="2" rx="0.4" fill="currentColor" stroke="none" />
+    <path d="M14 14v3h3" />
+    <path d="M18 14h3v3" />
+    <path d="M14 21h3" />
+    <path d="M21 21h.01" />
+  </symbol>
+  <symbol id="mc-question-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.6 9.3a2.4 2.4 0 1 1 3.8 2c-.8.5-1.4 1-1.4 2" />
+    <circle cx="12" cy="16.4" r="0.95" fill="currentColor" stroke="none" />
+  </symbol>
+  <symbol id="mc-quote-add" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 6h16" />
+    <path d="M4 10.5h14" />
+    <path d="M4 15h8.5" />
+    <path d="M4 19h6.5" />
+    <path d="M17.5 14v6" />
+    <path d="M14.5 17h6" />
+  </symbol>
+  <symbol id="mc-radio-checked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="12" r="4.5" fill="currentColor" stroke="none" />
+  </symbol>
+  <symbol id="mc-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19.8 14.5A8.2 8.2 0 1 1 19 7.8" />
+    <path d="M19.5 3.8v4.3h-4.3" />
+  </symbol>
+  <symbol id="mc-remote-control" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 15.2v3.3a2.5 2.5 0 0 1-2.5 2.5h-5A2.5 2.5 0 0 1 3 18.5v-13A2.5 2.5 0 0 1 5.5 3h3.2" />
+    <path d="M7 18h2" />
+    <path d="M12.5 9.2a2.6 2.6 0 0 1 2.6 2.6" />
+    <path d="M12.5 6.2a5.6 5.6 0 0 1 5.6 5.6" />
+    <path d="M12.5 3.2a8.6 8.6 0 0 1 8.6 8.6" />
+  </symbol>
+  <symbol id="mc-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="10.8" cy="10.8" r="7.2" />
+    <path d="M16 16l4.5 4.5" />
+  </symbol>
+  <symbol id="mc-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="4" width="18" height="6.5" rx="2" />
+    <rect x="3" y="13.5" width="18" height="6.5" rx="2" />
+    <circle cx="7" cy="7.25" r="0.9" fill="currentColor" stroke="none" />
+    <circle cx="7" cy="16.75" r="0.9" fill="currentColor" stroke="none" />
+    <path d="M12.5 7.25h4.5" />
+    <path d="M12.5 16.75h4.5" />
+  </symbol>
+  <symbol id="mc-session" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 4c5 0 9 3.3 9 7.4s-4 7.4-9 7.4c-1.3 0-2.5-.2-3.6-.6L4.5 20.3l1.1-3.8C4 15.2 3 13.4 3 11.4 3 7.3 7 4 12 4Z" />
+    <path d="M8.5 9.8h7" />
+    <path d="M8.5 13.3h4.5" />
+  </symbol>
+  <symbol id="mc-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10.74 3.09 L13.26 3.09 L13.59 5.49 L15.48 6.27 L17.41 4.81 L19.19 6.59 L17.73 8.52 L18.51 10.41 L20.91 10.74 L20.91 13.26 L18.51 13.59 L17.73 15.48 L19.19 17.41 L17.41 19.19 L15.48 17.73 L13.59 18.51 L13.26 20.91 L10.74 20.91 L10.41 18.51 L8.52 17.73 L6.59 19.19 L4.81 17.41 L6.27 15.48 L5.49 13.59 L3.09 13.26 L3.09 10.74 L5.49 10.41 L6.27 8.52 L4.81 6.59 L6.59 4.81 L8.52 6.27 L10.41 5.49 Z" />
+    <circle cx="12" cy="12" r="2.8" />
+  </symbol>
+  <symbol id="mc-skill-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 3.2L5.5 13h6l-1 7.8L18.5 11h-6l.5-7.8Z" />
+  </symbol>
+  <symbol id="mc-square-checked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+    <path d="M8.5 12.3l2.3 2.3 4.8-5" />
+  </symbol>
+  <symbol id="mc-square" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+  </symbol>
+  <symbol id="mc-stop-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <rect x="8.8" y="8.8" width="6.4" height="6.4" rx="1.4" />
+  </symbol>
+  <symbol id="mc-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="4.5" y="4.5" width="15" height="15" rx="3" />
+  </symbol>
+  <symbol id="mc-subagent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="5.5" r="2.3" />
+    <circle cx="5.5" cy="18.2" r="2.3" />
+    <circle cx="18.5" cy="18.2" r="2.3" />
+    <path d="M12 7.8v2.2" />
+    <path d="M12 10a2 2 0 0 1-2 2H7.5a2 2 0 0 0-2 2v1.9" />
+    <path d="M12 10a2 2 0 0 0 2 2h2.5a2 2 0 0 1 2 2v1.9" />
+  </symbol>
+  <symbol id="mc-symlink" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10.2 13.8a4.2 4.2 0 0 0 6 0l2.8-2.8a4.2 4.2 0 0 0-6-6l-1.5 1.5" />
+    <path d="M13.8 10.2a4.2 4.2 0 0 0-6 0L5 13a4.2 4.2 0 0 0 6 6l1.5-1.5" />
+  </symbol>
+  <symbol id="mc-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <path d="M3 8.5h18" />
+    <path d="M7.25 12l2.5 2.25-2.5 2.25" />
+    <path d="M12.5 16.5h3.5" />
+  </symbol>
+  <symbol id="mc-thinking-scribble" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 14.5c1-2.8 2-4.5 2.8-4.5s1.4 6.5 2.5 6.5 2-10.5 3.4-10.5 1.8 9.5 3.1 9.5 1.8-6 2.9-6 1.5 3.2 3.3 2.5" />
+  </symbol>
+  <symbol id="mc-thinking" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="9.2" cy="9.2" r="2.2" />
+    <circle cx="15.4" cy="13.8" r="1.5" />
+    <circle cx="10.2" cy="15.8" r="0.9" fill="currentColor" stroke="none" />
+  </symbol>
+  <symbol id="mc-tool-wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l2.6-2.6a4.8 4.8 0 0 1-6.6 6.6l-6.2 6.2a2 2 0 1 1-2.8-2.8l6.2-6.2a4.8 4.8 0 0 1 6.6-6.6l-2.8 2.4Z" />
+  </symbol>
+  <symbol id="mc-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 6.5h16" />
+    <path d="M9.5 6.5V4.8A1.3 1.3 0 0 1 10.8 3.5h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7" />
+    <path d="M6 6.5l.8 11.7a2.2 2.2 0 0 0 2.2 2h6a2.2 2.2 0 0 0 2.2-2L18 6.5" />
+    <path d="M10 10.5v6" />
+    <path d="M14 10.5v6" />
+  </symbol>
+  <symbol id="mc-undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 5.5L4.5 10 9 14.5" />
+    <path d="M5 10h9.5a5 5 0 0 1 0 10H9" />
+  </symbol>
+  <symbol id="mc-user-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="9.5" r="2.8" />
+    <path d="M6.8 19a6 6 0 0 1 10.4 0" />
+  </symbol>
+  <symbol id="mc-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="7.5" r="3.8" />
+    <path d="M4.8 20a7.2 7.2 0 0 1 14.4 0" />
+  </symbol>
+  <symbol id="mc-video" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <path d="M7.5 4v16" />
+    <path d="M16.5 4v16" />
+    <path d="M3 8h4.5" />
+    <path d="M3 12h4.5" />
+    <path d="M3 16h4.5" />
+    <path d="M16.5 8H21" />
+    <path d="M16.5 12H21" />
+    <path d="M16.5 16H21" />
+  </symbol>
+  <symbol id="mc-web-relay" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19.7 10.3a8.5 8.5 0 1 1-6-6" />
+    <path d="M3 12.5h17" />
+    <path d="M11.5 4c-2.8 3-2.8 14 0 17" />
+    <path d="M11.5 21c2.4-2.3 3.2-5.5 3.3-8.5" />
+    <path d="M15.8 8.2L20.5 3.5" />
+    <path d="M16.5 3.5h4v4" />
+  </symbol>
+  <symbol id="mc-wifi-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 9.5a12.4 12.4 0 0 1 16.2-1" />
+    <path d="M6.2 13a8 8 0 0 1 9.6-1" />
+    <path d="M9.2 16.3a3.8 3.8 0 0 1 4.8-.2" />
+    <circle cx="11.5" cy="19.3" r="1.1" fill="currentColor" stroke="none" />
+    <path d="M19.5 12v4.2" />
+    <circle cx="19.5" cy="19.2" r="1" fill="currentColor" stroke="none" />
+  </symbol>
+  <symbol id="mc-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3.2 9.5a12.5 12.5 0 0 1 17.6 0" />
+    <path d="M6.4 13a8.2 8.2 0 0 1 11.2 0" />
+    <path d="M9.5 16.3a3.8 3.8 0 0 1 5 0" />
+    <circle cx="12" cy="19.3" r="1.1" fill="currentColor" stroke="none" />
+  </symbol>
+  <symbol id="mc-workspace" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 7a2.5 2.5 0 0 1 2.5-2.5h3c.6 0 1.2.3 1.55.8l.9 1.3c.35.5.95.8 1.55.8h6A2.5 2.5 0 0 1 21 9.9V17a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17V7Z" />
+  </symbol>
+</svg>

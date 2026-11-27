@@ -64,10 +64,10 @@ struct UpdateNoticeSheet: View {
                                 .frame(maxHeight: 430)
 
                             HStack(spacing: 6) {
-                                Label("侧栏", systemImage: "line.3.horizontal")
-                                Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                                Label { Text("侧栏") } icon: { MoonIcon("mc-menu", size: 13) }
+                                MoonIcon("mc-chevron-right", size: 11)
                                 Text("账号")
-                                Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                                MoonIcon("mc-chevron-right", size: 11)
                                 Text("打开Kimi Code网页版")
                                     .foregroundStyle(.primary)
                                     .fontWeight(.medium)
@@ -240,10 +240,9 @@ struct WebFallbackDemo: View {
                     .font(.system(size: 8.5, weight: .semibold))
                 Spacer()
                 HStack(spacing: 3) {
-                    Image(systemName: "wifi")
-                    Image(systemName: "battery.100")
+                    MoonIcon("mc-wifi", size: 8)
+                    MoonIcon("mc-battery", size: 9)
                 }
-                .font(.system(size: 7))
             }
             .padding(.horizontal, 14)
         }
@@ -261,8 +260,7 @@ struct WebFallbackDemo: View {
                     .fill(Color(.secondarySystemBackground))
                     .frame(width: 22, height: 22)
                     .overlay {
-                        Image(systemName: "line.3.horizontal")
-                            .font(.system(size: 9.5, weight: .semibold))
+                        MoonIcon("mc-menu", size: 9.5)
                     }
                 Spacer()
                 HStack(spacing: 5) {
@@ -277,8 +275,7 @@ struct WebFallbackDemo: View {
                         .fill(Color(.secondarySystemBackground))
                         .frame(width: 22, height: 22)
                         .overlay {
-                            Image(systemName: "folder")
-                                .font(.system(size: 9))
+                            MoonIcon("mc-workspace", size: 9)
                         }
                 }
             }
@@ -311,8 +308,7 @@ struct WebFallbackDemo: View {
                         .fill(Color.primary)
                         .frame(width: 15, height: 15)
                         .overlay {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 7.5, weight: .bold))
+                            MoonIcon("mc-arrow-up", size: 7.5)
                                 .foregroundStyle(Color(.systemBackground))
                         }
                         .padding(7)
@@ -349,8 +345,7 @@ struct WebFallbackDemo: View {
                 }
 
                 HStack(spacing: 6) {
-                    Image(systemName: "folder.badge.plus")
-                        .font(.system(size: 9))
+                    MoonIcon("mc-add-workspace", size: 9)
                     Text("添加文件夹")
                         .font(.system(size: 8))
                 }
@@ -361,8 +356,7 @@ struct WebFallbackDemo: View {
                         let isFolder = index % 3 == 0
                         HStack(spacing: 6) {
                             if isFolder {
-                                Image(systemName: "folder")
-                                    .font(.system(size: 8))
+                                MoonIcon("mc-workspace", size: 8)
                                     .foregroundStyle(.secondary)
                             }
                             Capsule()
@@ -382,14 +376,12 @@ struct WebFallbackDemo: View {
                         .fill(Palette.kimi.opacity(0.2))
                         .frame(width: 18, height: 18)
                         .overlay {
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 8.5))
+                            MoonIcon("mc-user", size: 8.5)
                                 .foregroundStyle(Palette.kimi)
                         }
                     Text("Kimi 用户")
                         .font(.system(size: 8, weight: .semibold))
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 6.5, weight: .semibold))
+                    MoonIcon("mc-chevron-right", size: 6.5)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                 }
@@ -420,8 +412,7 @@ struct WebFallbackDemo: View {
                         .fill(Palette.kimi.opacity(0.2))
                         .frame(width: 24, height: 24)
                         .overlay {
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 10.5))
+                            MoonIcon("mc-user", size: 10.5)
                                 .foregroundStyle(Palette.kimi)
                         }
                     Text("Kimi 用户")
@@ -468,11 +459,9 @@ struct WebFallbackDemo: View {
                         .foregroundStyle(webRowHighlighted ? Palette.kimi : .primary)
                         .lineLimit(1)
                     Spacer(minLength: 2)
-                    Image(systemName: "safari")
-                        .font(.system(size: 8.5))
+                    MoonIcon("mc-globe", size: 8.5)
                         .foregroundStyle(webRowHighlighted ? Palette.kimi : .secondary)
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 6.5, weight: .semibold))
+                    MoonIcon("mc-arrow-up-right", size: 6.5)
                         .foregroundStyle(webRowHighlighted ? Palette.kimi : .secondary)
                 }
                 .padding(.horizontal, 9)
@@ -507,8 +496,7 @@ struct WebFallbackDemo: View {
 
             VStack(spacing: 12) {
                 HStack(spacing: 4) {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 6.5))
+                    MoonIcon("mc-lock", size: 7)
                         .foregroundStyle(.secondary)
                     Text("code-rc.kimi.com")
                         .font(.system(size: 8, weight: .medium))
@@ -522,8 +510,7 @@ struct WebFallbackDemo: View {
                 Spacer()
 
                 VStack(spacing: 8) {
-                    Image(systemName: "safari.fill")
-                        .font(.system(size: 30))
+                    MoonIcon("mc-globe", size: 30)
                         .foregroundStyle(Palette.kimi)
                     Text("Kimi Code 网页版")
                         .font(.system(size: 10.5, weight: .bold))

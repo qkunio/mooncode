@@ -286,8 +286,10 @@ struct MathBlockView: View {
             .accessibilityLabel(latex)
             .contentShape(.rect)
             .contextMenu {
-                Button("拷贝公式", systemImage: "doc.on.doc") {
+                Button {
                     UIPasteboard.general.string = latex
+                } label: {
+                    Label("拷贝公式", image: "mc-copy")
                 }
             }
         } else {

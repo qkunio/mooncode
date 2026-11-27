@@ -634,27 +634,27 @@ enum ToolNames {
         return aliases[key] ?? key
     }
 
-    /// 官方图标名 → SF Symbol。
+    /// 官方图标名 → MoonCode SVG 图标名。
     static func symbol(_ name: String) -> String {
         switch normalize(name) {
-        case "read", "exitplanmode", "taskoutput": "doc.text"
-        case "bash": "terminal"
-        case "edit", "multi_edit": "pencil"
-        case "write": "doc.badge.plus"
-        case "grep", "search": "magnifyingglass"
-        case "glob": "doc.text.magnifyingglass"
-        case "ls": "folder"
-        case "web_fetch": "globe"
-        case "todo": "checklist"
-        case "task", "agentswarm": "sparkles"
-        case "askuserquestion": "questionmark.circle"
-        case "creategoal", "getgoal", "setgoalbudget", "updategoal": "target"
-        case "waitfor": "clock"
-        case "tasklist": "list.bullet"
-        case "taskstop": "stop.circle"
-        case "croncreate", "cronlist", "crondelete": "calendar"
-        case let other where other.contains("skill"): "bolt"
-        default: "wrench.and.screwdriver"
+        case "read", "exitplanmode", "taskoutput": "mc-file-preview"
+        case "bash": "mc-terminal"
+        case "edit", "multi_edit": "mc-edit"
+        case "write": "mc-file-plus"
+        case "grep", "search": "mc-search"
+        case "glob": "mc-file-search"
+        case "ls": "mc-workspace"
+        case "web_fetch": "mc-globe"
+        case "todo": "mc-checklist"
+        case "task", "agentswarm": "mc-thinking"
+        case "askuserquestion": "mc-question-circle"
+        case "creategoal", "getgoal", "setgoalbudget", "updategoal": "mc-goal-target"
+        case "waitfor": "mc-clock"
+        case "tasklist": "mc-list-bullet"
+        case "taskstop": "mc-stop-circle"
+        case "croncreate", "cronlist", "crondelete": "mc-calendar"
+        case let other where other.contains("skill"): "mc-skill-bolt"
+        default: "mc-tool-wrench"
         }
     }
 

@@ -63,8 +63,7 @@ struct ApprovalCard: View {
             Button {
                 minimized.toggle()
             } label: {
-                Image(systemName: minimized ? "chevron.up" : "chevron.down")
-                    .font(.footnote.weight(.semibold))
+                MoonIcon(minimized ? "mc-chevron-up" : "mc-chevron-down", size: 13)
                     .foregroundStyle(.secondary)
                     .frame(width: 28, height: 28)
                     .contentShape(.rect)
@@ -86,7 +85,11 @@ struct ApprovalCard: View {
                     field("工作目录：\(cwd)")
                 }
                 if let danger = block.danger {
-                    Label("危险: \(danger)", systemImage: "exclamationmark.triangle")
+                    Label {
+                        Text("危险: \(danger)")
+                    } icon: {
+                        MoonIcon("mc-alert-triangle", size: 13)
+                    }
                         .font(.caption)
                         .foregroundStyle(Palette.danger)
                 }
@@ -120,7 +123,11 @@ struct ApprovalCard: View {
                 if let description = block.description { field(description) }
             case "todo":
                 ForEach(Array(block.todos.enumerated()), id: \.offset) { _, item in
-                    Label(item.title, systemImage: item.status == "completed" ? "checkmark.circle.fill" : item.status == "in_progress" ? "circle.dotted" : "circle")
+                    Label {
+                        Text(item.title)
+                    } icon: {
+                        MoonIcon(item.status == "completed" ? "mc-check-circle" : item.status == "in_progress" ? "mc-circle-dotted" : "mc-circle", size: 15)
+                    }
                         .font(.subheadline)
                         .foregroundStyle(item.status == "completed" ? .secondary : .primary)
                 }
@@ -433,8 +440,7 @@ struct QuestionCard: View {
                 Button {
                     minimized.toggle()
                 } label: {
-                    Image(systemName: minimized ? "chevron.up" : "chevron.down")
-                        .font(.footnote.weight(.semibold))
+                    MoonIcon(minimized ? "mc-chevron-up" : "mc-chevron-down", size: 13)
                         .foregroundStyle(.secondary)
                         .frame(width: 28, height: 28)
                         .contentShape(.rect)
@@ -511,11 +517,13 @@ struct QuestionCard: View {
             toggle(option.id, in: question)
         } label: {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: question.multiSelect
-                    ? (selected ? "checkmark.square.fill" : "square")
-                    : (selected ? "largecircle.fill.circle" : "circle"))
+                MoonIcon(
+                    question.multiSelect
+                        ? (selected ? "mc-square-checked" : "mc-square")
+                        : (selected ? "mc-radio-checked" : "mc-circle"),
+                    size: 18
+                )
                     .foregroundStyle(selected ? AnyShapeStyle(Palette.kimi) : AnyShapeStyle(.tertiary))
-                    .font(.body)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(option.label)
@@ -546,8 +554,12 @@ struct QuestionCard: View {
 
     private func otherRow(_ question: QuestionRequest.Question) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: hasOther(question) ? (question.multiSelect ? "checkmark.square.fill" : "largecircle.fill.circle")
-                : (question.multiSelect ? "square" : "circle"))
+            MoonIcon(
+                hasOther(question)
+                    ? (question.multiSelect ? "mc-square-checked" : "mc-radio-checked")
+                    : (question.multiSelect ? "mc-square" : "mc-circle"),
+                size: 18
+            )
                 .foregroundStyle(hasOther(question) ? AnyShapeStyle(Palette.kimi) : AnyShapeStyle(.tertiary))
             TextField(
                 question.otherLabel ?? "其他",

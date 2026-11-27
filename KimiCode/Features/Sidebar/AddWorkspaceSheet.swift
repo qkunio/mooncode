@@ -74,8 +74,7 @@ struct AddWorkspaceSheet: View {
             Button {
                 if let parent { Task { await browse(parent) } }
             } label: {
-                Image(systemName: "chevron.left")
-                    .font(.subheadline.weight(.semibold))
+                MoonIcon("mc-chevron-left", size: 15)
                     .frame(width: 34, height: 34)
                     .background(Color(.tertiarySystemFill), in: .circle)
             }
@@ -90,8 +89,7 @@ struct AddWorkspaceSheet: View {
                     ForEach(Array(crumbs.enumerated()), id: \.element.path) { index, crumb in
                         let isCurrent = index == crumbs.count - 1
                         if index > 0 {
-                            Image(systemName: "chevron.right")
-                                .font(.caption2.weight(.semibold))
+                            MoonIcon("mc-chevron-right", size: 11)
                                 .foregroundStyle(.tertiary)
                         }
                         // 上级目录可点；当前目录只加粗，不可点。
@@ -100,7 +98,7 @@ struct AddWorkspaceSheet: View {
                         } label: {
                             Group {
                                 if crumb.path == "/" {
-                                    Image(systemName: "externaldrive")
+                                    MoonIcon("mc-external-drive", size: 16)
                                         .accessibilityLabel("根目录")
                                 } else {
                                     Text(crumb.label)
@@ -144,7 +142,7 @@ struct AddWorkspaceSheet: View {
 
     private var searchField: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
+            MoonIcon("mc-search", size: 16)
                 .foregroundStyle(.secondary)
             TextField("", text: $query)
                 .accessibilityLabel("在此目录下搜索")
@@ -156,7 +154,7 @@ struct AddWorkspaceSheet: View {
                 Button {
                     query = ""
                 } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                    MoonIcon("mc-close-circle", size: 16).foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
             }
@@ -172,11 +170,15 @@ struct AddWorkspaceSheet: View {
     @ViewBuilder
     private var content: some View {
         if browseFailed {
-            ContentUnavailableView(
-                "无法打开此文件夹",
-                systemImage: "folder.badge.questionmark",
-                description: Text("请检查路径后重试。")
-            )
+            ContentUnavailableView {
+                Label {
+                    Text("无法打开此文件夹")
+                } icon: {
+                    MoonIcon("mc-folder-unknown", size: 42)
+                }
+            } description: {
+                Text("请检查路径后重试。")
+            }
         } else if isBrowsing {
             VStack(spacing: 8) {
                 ProgressView()
@@ -209,7 +211,7 @@ struct AddWorkspaceSheet: View {
     private func folderRow(_ title: String, open: @escaping () -> Void) -> some View {
         Button(action: open) {
             HStack(spacing: 12) {
-                Image(systemName: "folder")
+                MoonIcon("mc-workspace", size: 18)
                     .foregroundStyle(.secondary)
                     .frame(width: 22)
                 Text(title)
@@ -217,8 +219,7 @@ struct AddWorkspaceSheet: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                MoonIcon("mc-chevron-right", size: 12)
                     .foregroundStyle(.tertiary)
             }
             .contentShape(.rect)

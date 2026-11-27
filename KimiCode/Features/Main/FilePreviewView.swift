@@ -87,7 +87,11 @@ struct FilePreviewView: View {
             }
             .overlay(alignment: .bottom) {
                 if let toast {
-                    Label(toast, systemImage: "checkmark.circle.fill")
+                    Label {
+                        Text(toast)
+                    } icon: {
+                        MoonIcon("mc-check-circle", size: 16)
+                    }
                         .font(.subheadline.weight(.medium))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
@@ -111,24 +115,32 @@ struct FilePreviewView: View {
     private var menu: some View {
         Menu {
             if case let .text(file) = phase, renderableFormat(for: file) != nil {
-                Button(
-                    showsSource ? "查看渲染结果" : "查看源码",
-                    systemImage: showsSource ? "doc.richtext" : "chevron.left.forwardslash.chevron.right"
-                ) {
+                Button {
                     showsSource.toggle()
+                } label: {
+                    Label(
+                        showsSource ? "查看渲染结果" : "查看源码",
+                        image: showsSource ? "mc-file-rich" : "mc-code-brackets"
+                    )
                 }
             }
-            Button("下载", systemImage: "arrow.down.circle") { run(.download) }
+            Button { run(.download) } label: {
+                Label("下载", image: "mc-download-circle")
+            }
                 .disabled(isTooLarge)
             if isImage {
-                Button("保存到相册", systemImage: "photo.badge.arrow.down") { run(.saveToPhotos) }
+                Button { run(.saveToPhotos) } label: {
+                    Label("保存到相册", image: "mc-photo-save")
+                }
                     .disabled(isTooLarge)
             }
             if let addToChat {
-                Button("添加到会话", systemImage: "plus.bubble", action: addToChat)
+                Button(action: addToChat) {
+                    Label("添加到会话", image: "mc-add-to-chat")
+                }
             }
         } label: {
-            Label("更多", systemImage: "ellipsis")
+            Label("更多", image: "mc-more-horizontal")
         }
     }
 
@@ -144,28 +156,46 @@ struct FilePreviewView: View {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .tooLarge:
-            ContentUnavailableView(
-                "无法预览此文件",
-                systemImage: "exclamationmark.triangle",
-                description: Text(Self.tooLargeMessage)
-            )
+            ContentUnavailableView {
+                Label {
+                    Text("无法预览此文件")
+                } icon: {
+                    MoonIcon("mc-alert-triangle", size: 42)
+                }
+            } description: {
+                Text(Self.tooLargeMessage)
+            }
         case let .text(file):
             if file.content.isEmpty, !file.truncated {
-                ContentUnavailableView("空文件", systemImage: "doc")
+                ContentUnavailableView {
+                    Label {
+                        Text("空文件")
+                    } icon: {
+                        MoonIcon("mc-file-preview", size: 42)
+                    }
+                }
             } else {
                 textView(file)
             }
         case let .quickLook(url):
             QuickLookFile(url: url)
         case .unsupported:
-            ContentUnavailableView(
-                "暂不支持预览此类型",
-                systemImage: "doc",
-                description: Text("可以从右上角菜单下载，用其他 App 打开。")
-            )
+            ContentUnavailableView {
+                Label {
+                    Text("暂不支持预览此类型")
+                } icon: {
+                    MoonIcon("mc-file-preview", size: 42)
+                }
+            } description: {
+                Text("可以从右上角菜单下载，用其他 App 打开。")
+            }
         case let .failed(message):
             ContentUnavailableView {
-                Label("无法预览此文件", systemImage: "exclamationmark.triangle")
+                Label {
+                    Text("无法预览此文件")
+                } icon: {
+                    MoonIcon("mc-alert-triangle", size: 42)
+                }
             } description: {
                 Text(message)
             } actions: {
@@ -206,10 +236,11 @@ struct FilePreviewView: View {
     private func textView(_ file: FsContent) -> some View {
         VStack(spacing: 0) {
             if file.truncated {
-                Label(
-                    "仅显示开头部分，完整文件共 \(Int64(file.size).formatted(.byteCount(style: .file)))",
-                    systemImage: "info.circle"
-                )
+                Label {
+                    Text("仅显示开头部分，完整文件共 \(Int64(file.size).formatted(.byteCount(style: .file)))")
+                } icon: {
+                    MoonIcon("mc-info-circle", size: 14)
+                }
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(10)
@@ -382,7 +413,9 @@ struct FilePreviewSheet: View {
             FilePreviewView(client: client, sessionID: sessionID, entry: entry)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("关闭", systemImage: "xmark") { dismiss() }
+                        Button { dismiss() } label: {
+                            Label("关闭", image: "mc-close")
+                        }
                     }
                 }
         }
