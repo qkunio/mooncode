@@ -127,4 +127,13 @@ enum KapError: LocalizedError {
     static func isProtocolMismatch(_ error: any Error) -> Bool {
         (error as? KapError)?.isLikelyProtocolMismatch == true
     }
+
+    /// 请求被任务或系统网络栈取消（`CancellationError` / `URLError.cancelled` / `KapError.cancelled`），属于正常中断而非错误。
+    static func isCancellation(_ error: any Error) -> Bool {
+        if error is CancellationError { return true }
+        if case .cancelled = error as? KapError { return true }
+        if (error as? URLError)?.code == .cancelled { return true }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+    }
 }

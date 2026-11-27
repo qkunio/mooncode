@@ -129,6 +129,11 @@ final class AppModel {
             }
             clearError()
         } catch {
+            guard !Task.isCancelled, !KapError.isCancellation(error) else { return }
+            if silent {
+                if let kapError = error as? KapError, kapError.requiresReauth { signOut() }
+                return
+            }
             handle(error)
         }
     }
@@ -404,6 +409,7 @@ final class AppModel {
     }
 
     private func handle(_ error: any Error) {
+        guard !Task.isCancelled, !KapError.isCancellation(error) else { return }
         if let kapError = error as? KapError, kapError.requiresReauth {
             signOut()
             return

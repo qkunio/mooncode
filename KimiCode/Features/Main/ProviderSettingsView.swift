@@ -211,8 +211,8 @@ struct ProviderSettingsSheet: View {
             let all = (try? await list) ?? []
             models = all.filter(\.isKimiSubscription) + all.filter { !$0.isKimiSubscription }
             loadError = nil
-        } catch is CancellationError {
         } catch {
+            guard !Task.isCancelled, !KapError.isCancellation(error) else { return }
             if providers == nil { loadError = error.localizedDescription }
         }
     }
@@ -940,8 +940,8 @@ private struct CatalogListView: View {
         loadError = nil
         do {
             items = try await client.catalogProviders()
-        } catch is CancellationError {
         } catch {
+            guard !Task.isCancelled, !KapError.isCancellation(error) else { return }
             loadError = error.localizedDescription
         }
     }

@@ -362,6 +362,7 @@ final class ChatModel {
     }
 
     private func presentError(_ error: any Error) {
+        guard !Task.isCancelled, !KapError.isCancellation(error) else { return }
         if KapError.isProtocolMismatch(error) {
             isCompatibilityError = true
             errorMessage = KapError.protocolMismatchMessage
@@ -420,8 +421,7 @@ final class ChatModel {
             }
         } catch {
             // 切换会话/停止订阅取消的是读取任务，不代表出错。
-            guard !Task.isCancelled, !(error is CancellationError),
-                  (error as? URLError)?.code != .cancelled else { return }
+            guard !Task.isCancelled, !KapError.isCancellation(error) else { return }
             // 重拉失败就把旧正文放回来，总比一直挂着骨架强。
             isRefreshingStale = false
             presentError(error)
@@ -446,7 +446,7 @@ final class ChatModel {
             }
             rebuild()
         } catch {
-            guard !(error is CancellationError) else { return }
+            guard !Task.isCancelled, !KapError.isCancellation(error) else { return }
             presentError(error)
         }
     }

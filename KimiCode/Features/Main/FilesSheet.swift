@@ -134,8 +134,8 @@ private struct FolderListView: View {
         do {
             list = try await client.listFiles(sessionID, path: path)
             failed = false
-        } catch is CancellationError {
         } catch {
+            guard !Task.isCancelled, !KapError.isCancellation(error) else { return }
             if list == nil { failed = true }
         }
     }

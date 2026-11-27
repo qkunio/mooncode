@@ -319,6 +319,12 @@ struct AttachmentChecks {
         precondition(KapError.api(code: -1, message: "Not connected").localizedDescription == "当前设备已离线。")
         precondition(KapError.notConnected.localizedDescription == "当前设备已离线。")
         precondition(KapError.http(status: 500, body: "other failure").localizedDescription == "HTTP 500：other failure")
+        precondition(KapError.isCancellation(CancellationError()))
+        precondition(KapError.isCancellation(KapError.cancelled))
+        precondition(KapError.isCancellation(URLError(.cancelled)))
+        precondition(KapError.isCancellation(NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)))
+        precondition(!KapError.isCancellation(URLError(.timedOut)))
+        precondition(!KapError.isCancellation(KapError.notConnected))
 
         let mediaSource = AttachmentSource(.object(["kind": .string("session_media"), "fileId": .string("f_photo")]))
         precondition(mediaSource == .sessionMedia("f_photo"))
