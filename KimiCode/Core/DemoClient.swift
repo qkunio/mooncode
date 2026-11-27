@@ -633,7 +633,9 @@ private enum DemoData {
         ]
         """)
 
-    static let configDefaults: ServerConfigDefaults = decode(#"{"default_model":"kimi-code/k3"}"#)
+    static let configDefaults: ServerConfigDefaults = decode(
+        #"{"default_model":"kimi-code/k3","default_permission_mode":"auto","thinking":{"enabled":true,"effort":"low"}}"#
+    )
 
     static let provider: ProviderItem = decode("""
         {"id":"managed:kimi-code","type":"kimi","has_api_key":true,"status":"connected",\

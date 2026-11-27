@@ -902,22 +902,28 @@ struct ModelList: Decodable, Sendable {
     let items: [ModelInfo]
 }
 
-/// `GET /config` 里只取默认模型。整个 config 含 provider 配置，别整体解码/打日志。
+/// `GET /config` 里只取新会话默认值。整个 config 含 provider 配置，别整体解码/打日志。
 struct ServerConfigDefaults: Decodable, Sendable {
     let defaultModel: String?
     /// 新会话默认权限；没设时网页端按「始终询问」（manual）显示。
     let defaultPermissionMode: PermissionMode?
-    /// 新会话默认思考：`{enabled}` 或 `{enabled, effort}`。
+    /// 新会话默认思考：`{enabled?}` 或 `{enabled?, effort?}`。
     let thinking: ThinkingConfig?
 
     struct ThinkingConfig: Codable, Sendable, Equatable {
-        let enabled: Bool
+        /// 服务端 schema 里 `enabled` 与 `effort` 均为可选（如只写 `effort = "high"`）。
+        let enabled: Bool?
         var effort: String?
 
         /// 网页端 `bpe`：off → 关、on → 开（不带强度）、其余是强度名。
         init(option: String) {
             enabled = option != "off"
             effort = option == "off" || option == "on" ? nil : option
+        }
+
+        init(enabled: Bool?, effort: String? = nil) {
+            self.enabled = enabled
+            self.effort = effort
         }
     }
 
@@ -929,18 +935,28 @@ struct ServerConfigDefaults: Decodable, Sendable {
 
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        defaultModel = try? c.decodeIfPresent(String.self, forKey: .defaultModel)
+        let rawModel = try? c.decodeIfPresent(String.self, forKey: .defaultModel)
+        defaultModel = rawModel?.isEmpty == false ? rawModel : nil
         defaultPermissionMode = try? c.decodeIfPresent(PermissionMode.self, forKey: .defaultPermissionMode)
         thinking = try? c.decodeIfPresent(ThinkingConfig.self, forKey: .thinking)
     }
 
-    /// 网页端 `yT(...) ?? z1(model)`：配置里的思考在这个模型上可用就用它，否则用模型默认。
-    func thinkingOption(for model: ModelInfo) -> String {
+    /// 网页端 `Yz(thinking, model) ?? q2(model)`：配置里的思考在这个模型上可用就用它，否则用模型默认。
+    /// `enabled == false` 时立即返回（支持 `off` 用 `off`，恒开模型回退默认档位），避免误拾取合并残留的旧 `effort`。
+    static func thinkingOption(_ thinking: ThinkingConfig?, for model: ModelInfo) -> String {
         if let thinking {
-            if !thinking.enabled, model.thinkingOptions.contains("off") { return "off" }
-            if let effort = thinking.effort, model.thinkingOptions.contains(effort) { return effort }
+            if thinking.enabled == false {
+                return model.thinkingOptions.contains("off") ? "off" : model.defaultThinking
+            }
+            if let effort = thinking.effort, model.thinkingOptions.contains(effort) {
+                return effort
+            }
         }
         return model.defaultThinking
+    }
+
+    func thinkingOption(for model: ModelInfo) -> String {
+        Self.thinkingOption(thinking, for: model)
     }
 }
 

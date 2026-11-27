@@ -4,7 +4,7 @@ import Observation
 import UIKit
 #endif
 
-/// composer 上那一排的选择：权限模式 / 模型 / 思考。新会话会继承上一次的选择。
+/// composer 上那一排的选择：权限模式 / 模型 / 思考。新会话默认跟随电脑端 `/config` 配置。
 struct ComposerConfig: Codable, Equatable, Sendable {
     var permission: PermissionMode
     var modelID: String?
@@ -13,6 +13,21 @@ struct ComposerConfig: Codable, Equatable, Sendable {
 
     var patch: AgentConfigPatch {
         AgentConfigPatch(model: modelID, thinking: effort, permissionMode: permission)
+    }
+
+    /// 由服务端默认配置解析新会话的初始 composer 配置（未设默认权限时与网页端一致按 `.manual`）。
+    static func resolved(
+        models: [ModelInfo],
+        defaultModelID: String?,
+        defaultThinking: ServerConfigDefaults.ThinkingConfig?,
+        defaultPermissionMode: PermissionMode?
+    ) -> ComposerConfig {
+        let model = defaultModelID.flatMap { id in models.first { $0.model == id } } ?? models.first
+        return ComposerConfig(
+            permission: defaultPermissionMode ?? .manual,
+            modelID: model?.model,
+            effort: model.map { ServerConfigDefaults.thinkingOption(defaultThinking, for: $0) }
+        )
     }
 }
 
@@ -116,6 +131,15 @@ final class ChatModel {
     /// 草稿刚建成会话、第一条消息还没发出：服务端此时还是默认配置（建会话时不采纳 agent_config），
     /// 别让它覆盖 composer 上选好的值 —— 第一条消息会把模型 / 思考强度 / 权限一起带上。
     @ObservationIgnored private var holdsLocalConfig = false
+    /// 当前空白草稿里由用户手动改过的配置项：同步服务端最新默认值时不覆盖这些显式选择。
+    @ObservationIgnored private var draftOverrides: DraftConfigOverrides = []
+
+    private struct DraftConfigOverrides: OptionSet {
+        let rawValue: Int
+        static let permission = Self(rawValue: 1 << 0)
+        static let model = Self(rawValue: 1 << 1)
+        static let effort = Self(rawValue: 1 << 2)
+    }
     /// 只有收到严格解码的 agent 全量帧，才确认新版状态协议；usage/context 不能单独证明配置通道可用。
     @ObservationIgnored private var usesStateStream = false
     @ObservationIgnored private var legacyStatusUnavailable = false
@@ -192,7 +216,7 @@ final class ChatModel {
         onSessionCreated: @escaping (SessionSummary) -> Void,
         onSessionEvent: @escaping (String, SessionSummary) -> Void = { _, _ in },
         onPromptSent: @escaping (String, String) -> Void = { _, _ in },
-        onConfigChanged: @escaping (ComposerConfig) -> Void
+        onConfigChanged: @escaping (ComposerConfig) -> Void = { _ in }
     ) {
         self.session = session
         self.workspace = workspace
@@ -684,11 +708,49 @@ final class ChatModel {
         }
     }
 
+    /// 仅在未发消息的草稿上同步电脑端最新默认配置，不改已有会话，也不覆盖当前草稿里用户手动改过的项。
+    func applyDefaults(
+        _ defaults: ComposerConfig,
+        defaultThinking: ServerConfigDefaults.ThinkingConfig?,
+        models: [ModelInfo]
+    ) {
+        guard isDraft else { return }
+        var next = config
+        if !draftOverrides.contains(.permission) {
+            next.permission = defaults.permission
+        }
+        let modelChanged = !draftOverrides.contains(.model) && next.modelID != defaults.modelID
+        if !draftOverrides.contains(.model) {
+            next.modelID = defaults.modelID
+        }
+        let activeModel = next.modelID.flatMap { id in models.first { $0.model == id } }
+        if !draftOverrides.contains(.effort) {
+            if let activeModel {
+                next.effort = ServerConfigDefaults.thinkingOption(defaultThinking, for: activeModel)
+            } else {
+                next.effort = defaults.effort
+            }
+        } else if modelChanged, let activeModel {
+            next.effort = activeModel.normalizedThinking(next.effort)
+        }
+        if next != config {
+            config = next
+        }
+    }
+
     private func update(_ change: (inout ComposerConfig) -> Void) async {
         let previous = config
         var next = config
         change(&next)
         guard next != previous else { return }
+        if isDraft {
+            if next.permission != previous.permission { draftOverrides.insert(.permission) }
+            if next.modelID != previous.modelID {
+                draftOverrides.insert(.model)
+            } else if next.effort != previous.effort {
+                draftOverrides.insert(.effort)
+            }
+        }
         config = next
         onConfigChanged(next)
         // 草稿还没有会话，等第一条消息时连同配置一起建。

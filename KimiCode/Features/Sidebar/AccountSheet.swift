@@ -211,11 +211,7 @@ struct AccountSheet: View {
     }
 
     private func thinkingOption(for model: ModelInfo) -> String {
-        if let thinking = app.defaultThinking {
-            if !thinking.enabled, model.thinkingOptions.contains("off") { return "off" }
-            if let effort = thinking.effort, model.thinkingOptions.contains(effort) { return effort }
-        }
-        return model.defaultThinking
+        ServerConfigDefaults.thinkingOption(app.defaultThinking, for: model)
     }
 
     private func settingRow(title: String, value: String) -> some View {

@@ -55,7 +55,6 @@ final class AppModel {
     }
 
     private static let lastDeviceKey = "kimi.lastDeviceID"
-    private static let composerConfigKey = "kimi.composerConfig"
 
     // MARK: 客户端
 
@@ -147,6 +146,9 @@ final class AppModel {
         sessionPool.reset()
         syncSessions()
         models = []
+        defaultModelID = nil
+        defaultThinking = nil
+        defaultPermissionMode = nil
         usage = nil
         endpoint = .remote(deviceID: device.deviceID, name: device.shortName)
         reachability = DeviceReachability()
@@ -188,41 +190,54 @@ final class AppModel {
         let all = (try? await models) ?? []
         guard endpoint?.deviceID == expectedDeviceID else { return }
         self.models = all.filter(\.isKimiSubscription) + all.filter { !$0.isKimiSubscription }
-        if let defaults = try? await config { apply(defaults) }
-        if let value = try? await user { self.user = value }
+        if let defaults = try? await config, endpoint?.deviceID == expectedDeviceID {
+            apply(defaults)
+        } else if endpoint?.deviceID == expectedDeviceID {
+            syncDraftDefaults()
+        }
+        guard endpoint?.deviceID == expectedDeviceID else { return }
+        if let value = try? await user, endpoint?.deviceID == expectedDeviceID { self.user = value }
         reconcileDraft()
     }
 
     /// 供应商改完后重拉模型列表和默认配置（composer / 模型面板跟着变）。
     func reloadModels() async {
-        guard let client else { return }
+        guard let client, let expectedDeviceID = endpoint?.deviceID else { return }
         async let models = client.models()
         async let config = client.configDefaults()
-        if let all = try? await models {
+        if let all = try? await models, endpoint?.deviceID == expectedDeviceID {
             self.models = all.filter(\.isKimiSubscription) + all.filter { !$0.isKimiSubscription }
         }
-        if let defaults = try? await config { apply(defaults) }
+        if let defaults = try? await config, endpoint?.deviceID == expectedDeviceID {
+            apply(defaults)
+        } else if endpoint?.deviceID == expectedDeviceID {
+            syncDraftDefaults()
+        }
+        guard endpoint?.deviceID == expectedDeviceID else { return }
         reconcileDraft()
     }
 
-    /// 个人面板只改新会话的默认模型 / 强度 / 权限，不改当前会话的配置。
+    /// 个人面板只改新会话的默认模型 / 强度 / 权限，不改当前会话的配置（未手动修改的空白草稿同步跟随）。
     func updateDefaultModel(_ id: String) async throws {
-        guard let client else { return }
+        guard let client, let expectedDeviceID = endpoint?.deviceID else { return }
         let updated = try await client.updateConfig(ServerConfigPatch(defaultModel: id))
+        guard endpoint?.deviceID == expectedDeviceID else { return }
         apply(updated)
     }
 
     func updateDefaultThinking(_ option: String) async throws {
-        guard let client else { return }
+        guard let client, let expectedDeviceID = endpoint?.deviceID else { return }
         let updated = try await client.updateConfig(ServerConfigPatch(
             thinking: ServerConfigDefaults.ThinkingConfig(option: option)
         ))
+        guard endpoint?.deviceID == expectedDeviceID else { return }
         apply(updated)
     }
 
     func updateDefaultPermission(_ mode: PermissionMode) async throws {
-        guard let client else { return }
+        guard let client, let expectedDeviceID = endpoint?.deviceID else { return }
         let updated = try await client.updateConfig(ServerConfigPatch(defaultPermissionMode: mode))
+        guard endpoint?.deviceID == expectedDeviceID else { return }
         apply(updated)
     }
 
@@ -230,6 +245,11 @@ final class AppModel {
         defaultModelID = defaults.defaultModel
         defaultThinking = defaults.thinking
         defaultPermissionMode = defaults.defaultPermissionMode
+        syncDraftDefaults()
+    }
+
+    private func syncDraftDefaults() {
+        chat?.applyDefaults(defaultComposerConfig, defaultThinking: defaultThinking, models: models)
     }
 
     /// 打开侧栏时刷新：会话状态（忙/待确认）变化最快。
@@ -351,7 +371,7 @@ final class AppModel {
         return ChatModel(
             session: session,
             workspace: workspace,
-            config: initialComposerConfig,
+            config: defaultComposerConfig,
             client: client,
             endpoint: endpoint,
             tokenProvider: tokenProvider,
@@ -370,33 +390,19 @@ final class AppModel {
                 guard let self, self.endpoint?.deviceID == deviceID else { return }
                 self.sessionPool.recordPromptSent(sessionID: sessionID, text: text)
                 self.syncSessions()
-            },
-            onConfigChanged: { [weak self] config in
-                self?.rememberComposerConfig(config)
             }
         )
     }
 
-    /// 新对话继承上次的选择；第一次用时：权限「完全自动」（服务端默认）、服务端默认模型及其默认思考。
-    /// 记住的或服务端默认的模型已经不在这台电脑上了，就退到列表第一个（Kimi 订阅组优先）。
-    private var initialComposerConfig: ComposerConfig {
-        if let data = UserDefaults.standard.data(forKey: Self.composerConfigKey),
-           let stored = try? JSONDecoder().decode(ComposerConfig.self, from: data),
-           let storedModel = model(withID: stored.modelID) {
-            var config = stored
-            config.effort = storedModel.normalizedThinking(stored.effort)
-            return config
-        }
-        let fallback = model(withID: defaultModelID) ?? models.first
-        return ComposerConfig(
-            permission: .auto,
-            modelID: fallback?.model,
-            effort: fallback?.defaultThinking
+    /// 新对话默认配置：跟随电脑端 `/config` 的默认模型、默认思考强度与默认权限（权限未设时为「始终询问」）。
+    /// 若服务端默认模型已不在可用列表里，退回列表第一个（Kimi 订阅组优先）。
+    private var defaultComposerConfig: ComposerConfig {
+        ComposerConfig.resolved(
+            models: models,
+            defaultModelID: defaultModelID,
+            defaultThinking: defaultThinking,
+            defaultPermissionMode: defaultPermissionMode
         )
-    }
-
-    private func rememberComposerConfig(_ config: ComposerConfig) {
-        UserDefaults.standard.set(try? JSONEncoder().encode(config), forKey: Self.composerConfigKey)
     }
 
     // MARK: 输入框草稿
@@ -429,6 +435,9 @@ final class AppModel {
         user = nil
         usage = nil
         models = []
+        defaultModelID = nil
+        defaultThinking = nil
+        defaultPermissionMode = nil
         hasLoadedDevices = false
         isDemoMode = false
         clearError()
