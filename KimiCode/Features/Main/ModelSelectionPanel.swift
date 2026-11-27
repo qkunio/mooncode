@@ -66,8 +66,7 @@ struct ModelSelectionPanel: View {
                     .font(.headline)
                 HStack {
                     Button(action: { if let onBack { onBack() } else { dismiss() } }) {
-                        Image(systemName: onBack == nil ? "xmark" : "chevron.backward")
-                            .font(.body.weight(.medium))
+                        MoonIcon(onBack == nil ? "mc-close" : "mc-chevron-left", size: 18)
                             .frame(width: 32, height: 32)
                     }
                     .buttonStyle(.glass)
@@ -76,8 +75,7 @@ struct ModelSelectionPanel: View {
                     Spacer()
                     if client != nil {
                         Button(action: { showsSettings = true }) {
-                            Image(systemName: "gearshape")
-                                .font(.body.weight(.medium))
+                            MoonIcon("mc-settings", size: 18)
                                 .frame(width: 32, height: 32)
                         }
                         .buttonStyle(.glass)
@@ -174,8 +172,7 @@ struct ModelSelectionPanel: View {
                 Text(title)
                     .font(.body.weight(.medium))
                 Spacer(minLength: 12)
-                Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
+                MoonIcon("mc-check", size: 16)
                     .opacity(selected ? 1 : 0)
             }
             .foregroundStyle(.primary)

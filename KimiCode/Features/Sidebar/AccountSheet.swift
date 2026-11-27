@@ -105,11 +105,9 @@ struct AccountSheet: View {
                         .foregroundStyle(.primary)
                     Spacer(minLength: 8)
                     HStack(spacing: 6) {
-                        Image(systemName: "safari")
-                            .font(.body)
+                        MoonIcon("mc-globe", size: 18)
                             .foregroundStyle(.secondary)
-                        Image(systemName: "arrow.up.right")
-                            .font(.caption.weight(.semibold))
+                        MoonIcon("mc-arrow-up-right", size: 13)
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -180,13 +178,12 @@ struct AccountSheet: View {
                         Spacer(minLength: 8)
                         HStack(spacing: 6) {
                             let mode = app.defaultPermissionMode ?? .manual
-                            Image(systemName: mode.symbolName)
+                            MoonIcon(mode.symbolName, size: 17)
                             Text(mode.title)
                             if isSavingDefault {
                                 ProgressView().controlSize(.small)
                             } else {
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.footnote.weight(.semibold))
+                                MoonIcon("mc-chevron-up-down", size: 13)
                             }
                         }
                         .font(.body)
@@ -240,8 +237,7 @@ struct AccountSheet: View {
                 if isSavingDefault {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: "chevron.forward")
-                        .font(.caption.weight(.semibold))
+                    MoonIcon("mc-chevron-right", size: 12)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -397,8 +393,7 @@ struct AccountSheet: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.semibold))
+                    MoonIcon("mc-chevron-down", size: 12)
                         .foregroundStyle(.tertiary)
                         .rotationEffect(.degrees(showsOfflineDevices ? 180 : 0))
                 }
@@ -432,8 +427,7 @@ struct AccountSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     if isCurrent {
-                        Image(systemName: "checkmark")
-                            .font(.body.weight(.semibold))
+                        MoonIcon("mc-check", size: 16)
                             .foregroundStyle(isOnline ? Palette.kimi : .secondary)
                     }
                 }
@@ -459,8 +453,7 @@ struct AccountSheet: View {
                     Text("正在刷新设备…")
                         .foregroundStyle(.secondary)
                 } else {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.subheadline.weight(.medium))
+                    MoonIcon("mc-refresh", size: 16)
                     Text("刷新设备")
                 }
                 Spacer(minLength: 0)
@@ -500,8 +493,7 @@ private struct DefaultThinkingList: View {
                             .foregroundStyle(.primary)
                         Spacer()
                         if option == selected {
-                            Image(systemName: "checkmark")
-                                .font(.body.weight(.semibold))
+                            MoonIcon("mc-check", size: 16)
                                 .foregroundStyle(Palette.kimi)
                         }
                     }

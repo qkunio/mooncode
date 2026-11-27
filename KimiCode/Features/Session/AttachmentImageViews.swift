@@ -71,7 +71,7 @@ private struct RemoteAttachmentImage: View {
                     Image(uiImage: thumbnail).resizable().scaledToFit().padding(1)
                 } else if failed {
                     VStack(spacing: 6) {
-                        Image(systemName: "photo.badge.exclamationmark")
+                        MoonIcon("mc-photo-error", size: 22)
                         Text("重试").font(.caption2)
                     }
                     .foregroundStyle(.secondary)
@@ -127,7 +127,7 @@ struct LocalAttachmentPreviews: View {
                             Palette.fill
                             if let thumbnail = UIImage(data: image.2) ?? AttachmentImageThumbnail.make(image.1) {
                                 Image(uiImage: thumbnail).resizable().scaledToFit().padding(1)
-                            } else { Image(systemName: "photo").foregroundStyle(.secondary) }
+                            } else { MoonIcon("mc-photo", size: 22).foregroundStyle(.secondary) }
                         }
                         .frame(width: AttachmentThumbnailLayout.side, height: AttachmentThumbnailLayout.side)
                         .clipShape(.rect(cornerRadius: 12))
@@ -141,7 +141,7 @@ struct LocalAttachmentPreviews: View {
         }
         ForEach(attachments) { attachment in
             if case let .file(_, name, _, _) = attachment {
-                Label(name, systemImage: "doc").font(.subheadline).foregroundStyle(.secondary)
+                Label { Text(name) } icon: { MoonIcon("mc-file-preview", size: 15) }.font(.subheadline).foregroundStyle(.secondary)
             }
         }
     }
@@ -259,7 +259,9 @@ private struct AttachmentImageGallery: View {
                     .foregroundStyle(.white)
                     .accessibilityLabel("图片 \(index + 1)，共 \(selection.items.count) 张")
                 Spacer()
-                Button("关闭", systemImage: "xmark") { dismiss() }
+                Button { dismiss() } label: {
+                    Label("关闭", image: "mc-close")
+                }
                     .labelStyle(.iconOnly)
                     .frame(width: 44, height: 44)
                     .buttonStyle(.glass)
@@ -305,7 +307,11 @@ private struct AttachmentImagePage: View {
                     .accessibilityLabel("图片")
             } else if let errorMessage {
                 ContentUnavailableView {
-                    Label("图片加载失败", systemImage: "photo.badge.exclamationmark")
+                    Label {
+                        Text("图片加载失败")
+                    } icon: {
+                        MoonIcon("mc-photo-error", size: 42)
+                    }
                 } description: {
                     Text(errorMessage)
                 } actions: {

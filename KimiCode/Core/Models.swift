@@ -52,13 +52,13 @@ struct RemoteDevice: Decodable, Identifiable, Hashable, Sendable {
     var id: String { deviceID }
     var isOnline: Bool { status == "online" }
 
-    /// 平台 → SF Symbol。
+    /// 平台 → MoonCode SVG 图标名。
     var symbolName: String {
         switch platform {
-        case "darwin": "laptopcomputer"
-        case "win32": "pc"
-        case "linux": "server.rack"
-        default: "desktopcomputer"
+        case "darwin": "mc-device"
+        case "win32": "mc-desktop"
+        case "linux": "mc-server"
+        default: "mc-desktop"
         }
     }
 
@@ -586,9 +586,9 @@ enum PermissionMode: String, CaseIterable, Codable, Sendable, Identifiable {
 
     var symbolName: String {
         switch self {
-        case .manual: "hand.raised"
-        case .yolo: "checkmark.shield"
-        case .auto: "bolt.shield"
+        case .manual: "mc-permission-manual"
+        case .yolo: "mc-permission-ask"
+        case .auto: "mc-permission-auto"
         }
     }
 }

@@ -246,7 +246,7 @@ struct SelectableText: UIViewRepresentable {
         ) -> UIMenu? {
             guard let addToComposer, range.length > 0, NSMaxRange(range) <= textView.attributedText.length else { return nil }
             let text = textView.attributedText.attributedSubstring(from: range).stringWithMathSource
-            let add = UIAction(title: "添加到会话框", image: UIImage(systemName: "text.badge.plus")) { [weak textView] _ in
+            let add = UIAction(title: "添加到会话框", image: UIImage(named: "mc-quote-add")) { [weak textView] _ in
                 addToComposer(text)
                 _ = textView?.resignFirstResponder()
             }
@@ -278,7 +278,7 @@ struct SelectableText: UIViewRepresentable {
                   let math = attachment as? MathAttachment else {
                 return UITextItem.MenuConfiguration(menu: defaultMenu)
             }
-            let copy = UIAction(title: "拷贝公式", image: UIImage(systemName: "doc.on.doc")) { _ in
+            let copy = UIAction(title: "拷贝公式", image: UIImage(named: "mc-copy")) { _ in
                 UIPasteboard.general.string = math.latex
             }
             return UITextItem.MenuConfiguration(menu: UIMenu(children: [copy]))

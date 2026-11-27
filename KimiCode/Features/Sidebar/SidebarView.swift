@@ -102,8 +102,7 @@ struct SidebarView: View {
                 Text(app.user?.displayName ?? "Kimi 用户")
                     .font(.body.weight(.semibold))
                     .lineLimit(1)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                MoonIcon("mc-chevron-right", size: 12)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 8)
             }
@@ -123,8 +122,7 @@ struct SidebarView: View {
             isAddingWorkspace = true
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: "folder.badge.plus")
-                    .font(.system(size: 20, weight: .regular))
+                MoonIcon("mc-add-workspace", size: 20)
                     .frame(width: 24)
                 Text("添加文件夹")
                     .font(.body)
@@ -173,8 +171,7 @@ struct SidebarView: View {
                 toggle(workspace.id)
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 20, weight: .regular))
+                    MoonIcon("mc-workspace", size: 20)
                         .frame(width: 24)
                     Text(workspace.displayName)
                         .font(.body)
@@ -191,8 +188,7 @@ struct SidebarView: View {
                 app.newChat(in: workspace)
                 close()
             } label: {
-                Image(systemName: "plus")
-                    .font(.subheadline.weight(.semibold))
+                MoonIcon("mc-plus", size: 15)
                     .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
@@ -237,12 +233,12 @@ struct SidebarView: View {
                 renameText = session.displayTitle
                 renaming = session
             } label: {
-                Label("重命名", systemImage: "pencil")
+                Label("重命名", image: "mc-edit")
             }
             Button(role: .destructive) {
                 deleting = session
             } label: {
-                Label("删除对话", systemImage: "trash")
+                Label("删除对话", image: "mc-trash")
             }
         }
     }
@@ -256,12 +252,12 @@ private struct SessionStateDot: View {
     var body: some View {
         Group {
             if session.pendingInteraction != .none {
-                Image(systemName: "exclamationmark.circle.fill")
+                MoonIcon("mc-alert-circle", size: 13)
                     .foregroundStyle(.orange)
             } else if session.busy {
                 ProgressView().controlSize(.mini)
             } else {
-                Image(systemName: "circle")
+                MoonIcon("mc-circle", size: 11)
                     .foregroundStyle(.tertiary)
             }
         }
@@ -281,8 +277,10 @@ struct Avatar: View {
             if let image = phase.image {
                 image.resizable().scaledToFill()
             } else {
-                Image(systemName: "person.crop.circle.fill")
+                Image("mc-user-circle")
                     .resizable()
+                    .renderingMode(.template)
+                    .scaledToFit()
                     .foregroundStyle(.tertiary)
             }
         }

@@ -17,7 +17,7 @@ struct FilesButton: View {
         Button {
             isPresented = true
         } label: {
-            Label("文件", systemImage: "folder")
+            Label("文件", image: "mc-workspace")
         }
         .sheet(isPresented: $isPresented) {
             FilesSheet(client: client, sessionID: sessionID, title: title) { entry in
@@ -44,11 +44,15 @@ private struct FilesSheet: View {
                 if let client, let sessionID {
                     FolderListView(client: client, sessionID: sessionID, path: ".")
                 } else {
-                    ContentUnavailableView(
-                        "还没有可浏览的文件",
-                        systemImage: "folder",
-                        description: Text("发出第一条消息后，就能在这里查看这个文件夹里的文件。")
-                    )
+                    ContentUnavailableView {
+                        Label {
+                            Text("还没有可浏览的文件")
+                        } icon: {
+                            MoonIcon("mc-workspace", size: 42)
+                        }
+                    } description: {
+                        Text("发出第一条消息后，就能在这里查看这个文件夹里的文件。")
+                    }
                 }
             }
             .navigationTitle(title)
@@ -97,7 +101,13 @@ private struct FolderListView: View {
         Group {
             if let list {
                 if list.items.isEmpty {
-                    ContentUnavailableView("空文件夹", systemImage: "folder")
+                    ContentUnavailableView {
+                        Label {
+                            Text("空文件夹")
+                        } icon: {
+                            MoonIcon("mc-workspace", size: 42)
+                        }
+                    }
                 } else {
                     List {
                         Section {
@@ -114,7 +124,11 @@ private struct FolderListView: View {
                 }
             } else if failed {
                 ContentUnavailableView {
-                    Label("无法读取此文件夹", systemImage: "folder.badge.questionmark")
+                    Label {
+                        Text("无法读取此文件夹")
+                    } icon: {
+                        MoonIcon("mc-folder-unknown", size: 42)
+                    }
                 } description: {
                     Text("请确认电脑上的 Kimi Code 仍在运行。")
                 } actions: {
@@ -146,7 +160,7 @@ private struct FileRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: entry.symbolName)
+            MoonIcon(entry.symbolName, size: 19)
                 .foregroundStyle(entry.isDirectory ? AnyShapeStyle(Palette.kimi) : AnyShapeStyle(.secondary))
                 .frame(width: 24)
             Text(entry.name)
@@ -175,31 +189,31 @@ extension FsEntry {
     /// 文件列表行的图标。
     var symbolName: String {
         switch kind {
-        case .directory: return "folder.fill"
-        case .symlink: return "link"
+        case .directory: return "mc-workspace"
+        case .symlink: return "mc-symlink"
         case .file: break
         }
         switch (name as NSString).pathExtension.lowercased() {
         case "png", "jpg", "jpeg", "gif", "heic", "webp", "svg", "ico":
-            return "photo"
+            return "mc-photo"
         case "mp4", "mov", "m4v", "webm":
-            return "film"
+            return "mc-video"
         case "mp3", "wav", "m4a", "aac", "flac":
-            return "waveform"
+            return "mc-audio"
         case "zip", "gz", "tar", "tgz", "rar", "7z":
-            return "doc.zipper"
+            return "mc-file-zip"
         case "pdf":
-            return "doc.richtext"
+            return "mc-file-rich"
         case "md", "txt", "rtf", "log":
-            return "doc.text"
+            return "mc-file-preview"
         case "json", "yaml", "yml", "toml", "xml", "plist", "ini", "lock":
-            return "curlybraces"
+            return "mc-config-braces"
         case "swift", "ts", "tsx", "js", "jsx", "mjs", "vue", "py", "rb", "go", "rs", "java", "kt",
              "c", "h", "cc", "cpp", "hpp", "m", "mm", "cs", "php", "sh", "zsh", "bash", "css", "scss",
              "html", "sql":
-            return "chevron.left.forwardslash.chevron.right"
+            return "mc-code-brackets"
         default:
-            return "doc"
+            return "mc-file-preview"
         }
     }
 }

@@ -131,8 +131,7 @@ struct ModelPanel: View {
                 .font(.headline)
             HStack {
                 Button(action: { if back { go(.home) } else { dismiss() } }) {
-                    Image(systemName: back ? "chevron.backward" : "xmark")
-                        .font(.body.weight(.medium))
+                    MoonIcon(back ? "mc-chevron-left" : "mc-close", size: 18)
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.glass)
@@ -170,8 +169,7 @@ struct ModelPanel: View {
                     }
                 }
                 Spacer(minLength: 12)
-                Image(systemName: "chevron.forward")
-                    .font(.footnote.weight(.semibold))
+                MoonIcon("mc-chevron-right", size: 13)
                     .foregroundStyle(.tertiary)
             }
             .padding(20)

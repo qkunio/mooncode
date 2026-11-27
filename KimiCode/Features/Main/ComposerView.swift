@@ -157,8 +157,7 @@ struct ComposerView: View {
             isFocused = false
             activePanel = .attachment
         } label: {
-            Image(systemName: "plus")
-                .font(.body.weight(.medium))
+            MoonIcon("mc-plus", size: 18)
                 .foregroundStyle(.primary)
                 .frame(width: 30, height: 30)
                 .padding(4)
@@ -182,15 +181,14 @@ struct ComposerView: View {
                         Text(mode.title)
                         Text(mode.subtitle)
                     } icon: {
-                        Image(systemName: mode.symbolName)
+                        Image(mode.symbolName)
                     }
                     .tag(mode)
                 }
             }
             .pickerStyle(.inline)
         } label: {
-            Image(systemName: chat.config.permission.symbolName)
-                .font(.body.weight(.medium))
+            MoonIcon(chat.config.permission.symbolName, size: 18)
                 .foregroundStyle(.primary)
                 .frame(width: 30, height: 30)
                 .padding(4)
@@ -230,9 +228,9 @@ struct ComposerView: View {
             Text("添加附件")
                 .font(.headline)
             HStack(spacing: 16) {
-                attachmentCard("图片", symbol: "photo.on.rectangle", source: .photo)
+                attachmentCard("图片", symbol: "mc-photo", source: .photo)
                     .disabled(currentModel.map { !$0.acceptsImages } ?? false)
-                attachmentCard("文件", symbol: "doc", source: .file)
+                attachmentCard("文件", symbol: "mc-file-preview", source: .file)
             }
         }
         .padding(24)
@@ -247,8 +245,7 @@ struct ComposerView: View {
             activePanel = nil
         } label: {
             VStack(spacing: 12) {
-                Image(systemName: symbol)
-                    .font(.system(size: 28, weight: .regular))
+                MoonIcon(symbol, size: 28)
                 Text(title)
                     .font(.subheadline.weight(.medium))
             }
@@ -280,8 +277,7 @@ struct ComposerView: View {
             Button {
                 Task { await chat.abort() }
             } label: {
-                Image(systemName: "stop.fill")
-                    .font(.body.weight(.semibold))
+                MoonIcon("mc-stop", size: 16)
                     .frame(width: 30, height: 30)
                     .padding(4)
                     .foregroundStyle(.white)
@@ -296,8 +292,7 @@ struct ComposerView: View {
                 draft = ""
                 Task { await chat.send(text) }
             } label: {
-                Image(systemName: "arrow.up")
-                    .font(.body.weight(.semibold))
+                MoonIcon("mc-arrow-up", size: 18)
                     .frame(width: 30, height: 30)
                     .padding(4)
                     .foregroundStyle(.white)
@@ -361,9 +356,10 @@ private struct AttachmentStrip: View {
                             Button {
                                 chat.attachments.removeAll { $0.id == attachment.id }
                             } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .symbolRenderingMode(.palette)
-                                    .foregroundStyle(.white, .black.opacity(0.6))
+                                MoonIcon("mc-close", size: 10)
+                                    .foregroundStyle(.white)
+                                    .frame(width: 18, height: 18)
+                                    .background(.black.opacity(0.65), in: .circle)
                             }
                             .offset(x: 6, y: -6)
                             .accessibilityLabel("移除附件")
@@ -388,7 +384,7 @@ private struct AttachmentStrip: View {
             }
         case let .file(_, name, _, data):
             HStack(spacing: 8) {
-                Image(systemName: "doc.fill")
+                MoonIcon("mc-file-preview", size: 18)
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
@@ -405,7 +401,7 @@ private struct AttachmentStrip: View {
             .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 12))
         case let .mention(_, entry):
             HStack(spacing: 8) {
-                Image(systemName: entry.symbolName)
+                MoonIcon(entry.symbolName, size: 18)
                     .foregroundStyle(.secondary)
                 Text(entry.name)
                     .font(.caption.weight(.medium))

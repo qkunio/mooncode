@@ -22,7 +22,7 @@ struct DesktopRemoteDemo: View {
     private static let modal = CGRect(x: 34, y: 18, width: 292, height: 192)
     private static let listWidth: CGFloat = 86
     private static let rowTitles = ["通用", "账户", "模型供应商", "远程控制", "关于"]
-    private static let rowIcons = ["slider.horizontal.3", "person", "bolt", "iphone", "info.circle"]
+    private static let rowIcons = ["mc-settings", "mc-user", "mc-skill-bolt", "mc-remote-control", "mc-info-circle"]
     private static func rowY(_ index: Int) -> CGFloat { modal.minY + 40 + CGFloat(index) * 19 }
     private static let remoteRow = CGPoint(x: modal.minX + 50, y: rowY(3))
     private static let toggle = CGPoint(x: modal.maxX - 26, y: modal.minY + 54)
@@ -66,14 +66,9 @@ struct DesktopRemoteDemo: View {
                     LinearKeyframe(1.0, duration: 0.45)
                 }
                 .position(rippleAt)
-            Image(systemName: "cursorarrow")
-                .font(.system(size: 17, weight: .regular))
+            MoonIcon("mc-cursor", size: 17)
                 .foregroundStyle(.primary)
-                .background {
-                    Image(systemName: "cursorarrow")
-                        .font(.system(size: 17, weight: .black))
-                        .foregroundStyle(Color(.systemBackground))
-                }
+                .shadow(color: Color(.systemBackground), radius: 1.5)
                 .scaleEffect(pressing ? 0.85 : 1, anchor: .topLeading)
                 // 箭头尖在字形左上角
                 .position(x: cursor.x + 5, y: cursor.y + 8)
@@ -100,8 +95,8 @@ struct DesktopRemoteDemo: View {
             }
             .offset(x: 10, y: 10)
             VStack(alignment: .leading, spacing: 8) {
-                Label("新建会话", systemImage: "plus.circle")
-                Label("搜索", systemImage: "magnifyingglass")
+                Label { Text("新建会话") } icon: { MoonIcon("mc-plus-circle", size: 10) }
+                Label { Text("搜索") } icon: { MoonIcon("mc-search", size: 10) }
                 ForEach(0..<5) { index in
                     Capsule()
                         .fill(Color(.tertiarySystemFill))
@@ -120,8 +115,7 @@ struct DesktopRemoteDemo: View {
                 .fill(Color(.tertiarySystemFill))
                 .frame(width: 30, height: 6)
                 .position(x: 46, y: Self.gear.y)
-            Image(systemName: "gearshape")
-                .font(.system(size: 10, weight: .medium))
+            MoonIcon("mc-settings", size: 10)
                 .foregroundStyle(.secondary)
                 .position(Self.gear)
 
@@ -152,7 +146,7 @@ struct DesktopRemoteDemo: View {
             ForEach(Self.rowTitles.indices, id: \.self) { index in
                 let selected = index == (pane == .remote ? 3 : 0)
                 HStack(spacing: 4) {
-                    Image(systemName: Self.rowIcons[index]).frame(width: 10)
+                    MoonIcon(Self.rowIcons[index], size: 9).frame(width: 10)
                     Text(Self.rowTitles[index])
                 }
                 .font(.system(size: 7.5, weight: selected ? .semibold : .regular))
@@ -207,8 +201,7 @@ struct DesktopRemoteDemo: View {
                             Circle().fill(.white).padding(1.5)
                         }
                 }
-                Image(systemName: "qrcode")
-                    .font(.system(size: 46))
+                MoonIcon("mc-qr-code", size: 46)
                     .foregroundStyle(toggleOn ? Color.primary : Color(.tertiaryLabel))
                     .padding(6)
                     .background(Color(.systemBackground), in: .rect(cornerRadius: 6))
