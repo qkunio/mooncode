@@ -75,43 +75,15 @@ struct ConversationRetry: Decodable, Sendable {
     }
 }
 
-struct ConversationUsage: Decodable, Sendable {
-    let inputOther: Double
-    let output: Double
-    let inputCacheRead: Double
-    let inputCacheCreation: Double
-
-    enum CodingKeys: String, CodingKey {
-        case inputOther = "input_other"
-        case output
-        case inputCacheRead = "input_cache_read"
-        case inputCacheCreation = "input_cache_creation"
-    }
-
-    var transcriptUsage: TranscriptTokenUsage {
-        TranscriptTokenUsage(
-            inputOther: inputOther,
-            output: output,
-            inputCacheRead: inputCacheRead,
-            inputCacheCreation: inputCacheCreation
-        )
-    }
-
-    var transcriptTurnUsage: TranscriptTurnUsage {
-        TranscriptTurnUsage(inputTokens: inputOther, outputTokens: output, cachedTokens: inputCacheRead)
-    }
-}
-
 struct ConversationStep: Decodable, Sendable {
     let index: Int
     var outcome: String?
     var startedAt: String
     var endedAt: String?
     var finishReason: String?
-    var usage: ConversationUsage?
 
     enum CodingKeys: String, CodingKey {
-        case index, outcome, usage
+        case index, outcome
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case finishReason = "finish_reason"
@@ -272,12 +244,11 @@ struct ConversationTurn: Decodable, Sendable {
     var startedAt: String
     var endedAt: String?
     var durationMs: Double?
-    var usage: ConversationUsage?
     var steps: [ConversationStep]
     var items: [ConversationItem]?
 
     enum CodingKeys: String, CodingKey {
-        case ordinal, kind, status, outcome, error, retry, usage, steps, items
+        case ordinal, kind, status, outcome, error, retry, steps, items
         case turnID = "turn_id"
         case endReason = "end_reason"
         case turnNumber = "turn_number"
@@ -532,7 +503,6 @@ struct ConversationState: Sendable {
             )
             step.startedAt = summary.startedAt
             step.endedAt = summary.endedAt
-            step.usage = summary.usage?.transcriptUsage
             step.endReason = summary.finishReason
             return step
         }
@@ -619,7 +589,6 @@ struct ConversationState: Sendable {
         turn.startedAt = source.startedAt
         turn.endedAt = source.endedAt
         turn.durationMs = source.durationMs
-        turn.usage = source.usage?.transcriptTurnUsage
         turn.error = source.error?.message
         turn.endReason = source.endReason
         turn.steps = steps

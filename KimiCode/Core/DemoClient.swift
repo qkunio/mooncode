@@ -50,12 +50,8 @@ extension DemoClient: KapServicing {
         try DemoData.downloadFile(at: path)
     }
 
-    func sessions(pageSize: Int) async throws -> SessionList {
-        await backend.sessions(deviceID: deviceID, pageSize: pageSize, beforeID: nil)
-    }
-
-    func sessionPage(pageSize: Int, beforeID: String?, includeArchive _: Bool) async throws -> SessionList {
-        await backend.sessions(deviceID: deviceID, pageSize: pageSize, beforeID: beforeID)
+    func sessions(pageSize _: Int) async throws -> SessionList {
+        await backend.sessions(deviceID: deviceID)
     }
 
     func models() async throws -> [ModelInfo] { DemoData.models }
@@ -259,13 +255,8 @@ private actor DemoBackend {
             """)
     }
 
-    func sessions(deviceID: String, pageSize: Int, beforeID: String?) -> SessionList {
-        let sessions = state(for: deviceID).sessions
-        let start = beforeID.flatMap { id in
-            sessions.firstIndex(where: { $0.id == id }).map { $0 + 1 }
-        } ?? 0
-        let end = min(start + max(pageSize, 1), sessions.count)
-        return SessionList(items: Array(sessions[start ..< end]), hasMore: end < sessions.count)
+    func sessions(deviceID: String) -> SessionList {
+        SessionList(items: state(for: deviceID).sessions, hasMore: false)
     }
 
     // MARK: 会话

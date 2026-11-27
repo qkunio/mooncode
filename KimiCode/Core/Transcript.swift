@@ -48,19 +48,6 @@ struct TranscriptRetry: Decodable, Sendable, Equatable {
     let statusCode: Int?
 }
 
-struct TranscriptTokenUsage: Decodable, Sendable, Equatable {
-    let inputOther: Double
-    let output: Double
-    let inputCacheRead: Double?
-    let inputCacheCreation: Double
-}
-
-struct TranscriptTurnUsage: Decodable, Sendable, Equatable {
-    let inputTokens: Double?
-    let outputTokens: Double?
-    let cachedTokens: Double?
-}
-
 struct TranscriptStep: Decodable, Sendable, Equatable {
     let stepId: String
     let turnId: String
@@ -69,14 +56,12 @@ struct TranscriptStep: Decodable, Sendable, Equatable {
     var frames: [TranscriptFrame]
     var startedAt: String?
     var endedAt: String?
-    var usage: TranscriptTokenUsage?
-    var model: String?
     var retry: TranscriptRetry?
     var endReason: String?
     var endMessage: String?
 
     enum CodingKeys: String, CodingKey {
-        case stepId, turnId, ordinal, state, frames, startedAt, endedAt, usage, model, retry, endReason, endMessage
+        case stepId, turnId, ordinal, state, frames, startedAt, endedAt, retry, endReason, endMessage
     }
 
     init(stepId: String, turnId: String, ordinal: Int, state: String, frames: [TranscriptFrame]) {
@@ -97,8 +82,6 @@ struct TranscriptStep: Decodable, Sendable, Equatable {
             .compactMap(\.value) ?? []
         startedAt = try? c.decodeIfPresent(String.self, forKey: .startedAt)
         endedAt = try? c.decodeIfPresent(String.self, forKey: .endedAt)
-        usage = try? c.decodeIfPresent(TranscriptTokenUsage.self, forKey: .usage)
-        model = try? c.decodeIfPresent(String.self, forKey: .model)
         retry = try? c.decodeIfPresent(TranscriptRetry.self, forKey: .retry)
         endReason = try? c.decodeIfPresent(String.self, forKey: .endReason)
         endMessage = try? c.decodeIfPresent(String.self, forKey: .endMessage)
@@ -116,15 +99,13 @@ struct TranscriptTurn: Decodable, Sendable, Equatable {
     var steps: [TranscriptStep]
     var startedAt: String?
     var endedAt: String?
-    var usage: TranscriptTurnUsage?
-    var model: String?
     var durationMs: Double?
     var error: String?
     var endReason: String?
 
     enum CodingKeys: String, CodingKey {
         case turnId, triggerPromptId, ordinal, state, origin, prompt, attachmentIds, steps
-        case startedAt, endedAt, usage, model, durationMs, error, endReason
+        case startedAt, endedAt, durationMs, error, endReason
     }
 
     init(skeleton turnId: String) {
@@ -146,8 +127,6 @@ struct TranscriptTurn: Decodable, Sendable, Equatable {
         steps = (try? c.decodeIfPresent([Lossy<TranscriptStep>].self, forKey: .steps))?.compactMap(\.value) ?? []
         startedAt = try? c.decodeIfPresent(String.self, forKey: .startedAt)
         endedAt = try? c.decodeIfPresent(String.self, forKey: .endedAt)
-        usage = try? c.decodeIfPresent(TranscriptTurnUsage.self, forKey: .usage)
-        model = try? c.decodeIfPresent(String.self, forKey: .model)
         durationMs = try? c.decodeIfPresent(Double.self, forKey: .durationMs)
         error = try? c.decodeIfPresent(String.self, forKey: .error)
         endReason = try? c.decodeIfPresent(String.self, forKey: .endReason)
@@ -236,10 +215,6 @@ struct TranscriptTask: Decodable, Sendable, Equatable {
     var description: String?
     var agentId: String?
     var outputTail: String?
-    var startedAt: String?
-    var endedAt: String?
-    var usage: TranscriptTokenUsage?
-    var model: String?
 }
 
 /// 解码失败的元素跳过，别让一个没见过的 frame 毁掉整页。

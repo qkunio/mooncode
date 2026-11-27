@@ -47,16 +47,11 @@ private struct UsageSheet: View {
     let chat: ChatModel
     let usage: PlanUsage?
 
-    @Environment(AppModel.self) private var app
-    @State private var isConfirmingEstimate = false
-    @State private var showsEstimate = false
-
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     contextSection
-                    subscriptionSection
                     planSections
                 }
                 .padding(.horizontal, 20)
@@ -71,42 +66,9 @@ private struct UsageSheet: View {
                     SheetCloseButton()
                 }
             }
-            .navigationDestination(isPresented: $showsEstimate) {
-                if let client = app.client {
-                    UsageEstimateView(
-                        client: client,
-                        deviceID: app.endpoint?.deviceID ?? "current-device",
-                        subscriptionName: app.user?.userLevelName ?? "Kimi 订阅"
-                    )
-                }
-            }
         }
         .presentationDetents([.medium, .large])
         .presentationBackground(Color(.systemGroupedBackground))
-        .alert("我的订阅有多少 Token？", isPresented: $isConfirmingEstimate) {
-            Button("取消", role: .cancel) {}
-            Button("确认") { showsEstimate = true }
-        } message: {
-            Text("按照本机已使用的额度计算预计满额 Token 量，仅供参考。计算需要 30 秒左右。")
-        }
-    }
-
-    private var subscriptionSection: some View {
-        UsageSection(title: "当前订阅") {
-            HStack(spacing: 12) {
-                Text(app.user?.userLevelName ?? "Kimi 订阅")
-                    .font(.headline)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Button("我的订阅有多少Token？") { isConfirmingEstimate = true }
-                    .font(.subheadline.weight(.medium))
-                    .buttonStyle(.bordered)
-                    .disabled(app.client == nil)
-            }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
-        }
     }
 
     private var contextSection: some View {
@@ -190,7 +152,7 @@ private struct UsageSheet: View {
 }
 
 /// 卡片上方的灰色小标题 + 卡片。
-struct UsageSection<Content: View>: View {
+private struct UsageSection<Content: View>: View {
     let title: String
     @ViewBuilder var content: Content
 
@@ -205,7 +167,7 @@ struct UsageSection<Content: View>: View {
     }
 }
 
-struct UsageCard: View {
+private struct UsageCard: View {
     let title: String
     let value: String
     let ratio: Double
@@ -239,7 +201,7 @@ struct UsageCard: View {
 }
 
 /// 横条：浅色同色系轨道，上面按占比填深色。
-struct UsageBar: View {
+private struct UsageBar: View {
     let ratio: Double
     let tint: Color
 

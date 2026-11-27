@@ -173,7 +173,6 @@ struct SessionSummary: Decodable, Identifiable, Hashable, Sendable {
     let lastPrompt: String?
     let metadata: Metadata?
     let usage: Usage?
-    let agentConfig: AgentConfig?
 
     enum PendingInteraction: String, Decodable, Sendable {
         case none, approval, question
@@ -187,10 +186,6 @@ struct SessionSummary: Decodable, Identifiable, Hashable, Sendable {
 
     struct Metadata: Decodable, Hashable, Sendable {
         let cwd: String?
-    }
-
-    struct AgentConfig: Decodable, Hashable, Sendable {
-        let model: String?
     }
 
     struct Usage: Decodable, Hashable, Sendable {
@@ -241,7 +236,6 @@ struct SessionSummary: Decodable, Identifiable, Hashable, Sendable {
         case lastTurnReason = "last_turn_reason"
         case lastTurnOutcome = "last_turn_outcome"
         case lastPrompt = "last_prompt"
-        case agentConfig = "agent_config"
     }
 
     init(from decoder: any Decoder) throws {
@@ -274,7 +268,6 @@ struct SessionSummary: Decodable, Identifiable, Hashable, Sendable {
         lastPrompt = try c.decodeIfPresent(String.self, forKey: .lastPrompt)
         metadata = try? c.decodeIfPresent(Metadata.self, forKey: .metadata)
         usage = try? c.decodeIfPresent(Usage.self, forKey: .usage)
-        agentConfig = try? c.decodeIfPresent(AgentConfig.self, forKey: .agentConfig)
     }
 }
 
@@ -1190,7 +1183,6 @@ struct UserInfoResponse: Decodable, Sendable {
 struct KimiUser: Decodable, Sendable {
     let nickname: String?
     let avatar: String?
-    let userLevelName: String?
 
     var displayName: String {
         if let nickname, !nickname.isEmpty { return nickname }

@@ -57,9 +57,6 @@ private actor AttachmentCheckClient: KapServicing {
         try await base.downloadFile(sessionID, path: path)
     }
     func sessions(pageSize: Int) async throws -> SessionList { try await base.sessions(pageSize: pageSize) }
-    func sessionPage(pageSize: Int, beforeID: String?, includeArchive: Bool) async throws -> SessionList {
-        try await base.sessionPage(pageSize: pageSize, beforeID: beforeID, includeArchive: includeArchive)
-    }
     func models() async throws -> [ModelInfo] { try await base.models() }
     func configDefaults() async throws -> ServerConfigDefaults { try await base.configDefaults() }
     func updateConfig(_ patch: ServerConfigPatch) async throws -> ServerConfigDefaults {
