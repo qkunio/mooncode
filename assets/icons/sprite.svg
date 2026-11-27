@@ -27,7 +27,7 @@
     <path d="M6.5 17.5l11-11" />
     <path d="M8.5 6.5h9v9" />
   </symbol>
-  <symbol id="mc-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <symbol id="mc-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round">
     <path d="M12 19.5v-15" />
     <path d="M6 10.5l6-6 6 6" />
   </symbol>
@@ -409,7 +409,7 @@
     <circle cx="12" cy="12" r="9" />
     <rect x="8.8" y="8.8" width="6.4" height="6.4" rx="1.4" />
   </symbol>
-  <symbol id="mc-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <symbol id="mc-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
     <rect x="4.5" y="4.5" width="15" height="15" rx="3" />
   </symbol>
   <symbol id="mc-subagent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">

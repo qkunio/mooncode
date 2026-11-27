@@ -104,12 +104,8 @@ struct AccountSheet: View {
                         .font(.body)
                         .foregroundStyle(.primary)
                     Spacer(minLength: 8)
-                    HStack(spacing: 6) {
-                        MoonIcon("mc-globe", size: 18)
-                            .foregroundStyle(.secondary)
-                        MoonIcon("mc-arrow-up-right", size: 13)
-                            .foregroundStyle(.tertiary)
-                    }
+                    MoonIcon("mc-web-relay", size: 18)
+                        .foregroundStyle(.secondary)
                 }
                 .frame(minHeight: 32)
                 .contentShape(.rect)

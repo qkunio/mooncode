@@ -459,9 +459,7 @@ struct WebFallbackDemo: View {
                         .foregroundStyle(webRowHighlighted ? Palette.kimi : .primary)
                         .lineLimit(1)
                     Spacer(minLength: 2)
-                    MoonIcon("mc-globe", size: 8.5)
-                        .foregroundStyle(webRowHighlighted ? Palette.kimi : .secondary)
-                    MoonIcon("mc-arrow-up-right", size: 6.5)
+                    MoonIcon("mc-web-relay", size: 9)
                         .foregroundStyle(webRowHighlighted ? Palette.kimi : .secondary)
                 }
                 .padding(.horizontal, 9)
