@@ -37,16 +37,25 @@ struct SelectableText: UIViewRepresentable {
         coordinator.addToComposer = context.environment.addToComposer
         coordinator.openFilePreview = context.environment.openFilePreview
         let colorScheme = context.environment.colorScheme
-        let key = Coordinator.Key(content: content, dynamicTypeSize: context.environment.dynamicTypeSize, colorScheme: colorScheme)
+        let dynamicTypeSize = context.environment.dynamicTypeSize
+        let key = Coordinator.Key(content: content, dynamicTypeSize: dynamicTypeSize, colorScheme: colorScheme)
         if coordinator.key != key {
             coordinator.key = key
             coordinator.sizes = [:]
             let selection = view.selectedRange
             // 公式是画好的图片，颜色得按这时的深浅色定（换主题时 key 变了会重排）。
             let traits = view.traitCollection.modifyingTraits { $0.userInterfaceStyle = colorScheme == .dark ? .dark : .light }
-            view.attributedText = content.attributedString(traits: traits)
-            // 流式输出只往后追加：正在选的范围还在就留着。
-            if selection.length > 0, NSMaxRange(selection) <= view.attributedText.length {
+            coordinator.apply(
+                content: content,
+                dynamicTypeSize: dynamicTypeSize,
+                colorScheme: colorScheme,
+                traits: traits,
+                to: view
+            )
+            // 流式输出只往后追加：正在选的范围还在就留着；若选区完全在未改动前缀里系统已自动保留。
+            if selection.length > 0,
+               NSMaxRange(selection) <= view.textStorage.length,
+               view.selectedRange != selection {
                 view.selectedRange = selection
             }
         }
@@ -87,15 +96,144 @@ struct SelectableText: UIViewRepresentable {
             let colorScheme: ColorScheme
         }
 
+        struct StyleKey: Equatable {
+            let tone: TextTone
+            let dynamicTypeSize: DynamicTypeSize
+            let colorScheme: ColorScheme
+        }
+
+        struct RenderedBlock {
+            let block: MarkdownBlock
+            /// 尚未裁掉尾段间距的单块富文本，新段落追加到后面时可直接复用。
+            let untrimmed: NSAttributedString
+            let utf16Length: Int
+            var hasTrailingNewline: Bool
+        }
+
         struct SizeKey: Hashable {
             let width: CGFloat
             let hug: Bool
         }
 
         var key: Key?
+        var styleKey: StyleKey?
+        var renderedBlocks: [RenderedBlock] = []
         var sizes: [SizeKey: CGSize] = [:]
         var addToComposer: ((String) -> Void)?
         var openFilePreview: ((FsEntry) -> Void)?
+
+        /// 增量更新 `UITextView` 的 `textStorage`：
+        /// 连续 Markdown 段落流式增长时，前面已定稿的块既不重跑 CommonMark 解析，也不触发 TextKit 2 全量重排；
+        /// 只替换发生变化的末尾切片，跨段长按选词能力完全保持不变。
+        func apply(
+            content: RichText,
+            dynamicTypeSize: DynamicTypeSize,
+            colorScheme: ColorScheme,
+            traits: UITraitCollection,
+            to view: SelectableTextView
+        ) {
+            guard case let .markdown(newBlocks, tone) = content else {
+                styleKey = nil
+                renderedBlocks = []
+                view.attributedText = content.attributedString(traits: traits)
+                return
+            }
+
+            let nextStyle = StyleKey(tone: tone, dynamicTypeSize: dynamicTypeSize, colorScheme: colorScheme)
+            let canReusePrefix = styleKey == nextStyle && !renderedBlocks.isEmpty
+
+            var commonPrefix = 0
+            if canReusePrefix {
+                let limit = min(renderedBlocks.count, newBlocks.count)
+                while commonPrefix < limit, renderedBlocks[commonPrefix].block == newBlocks[commonPrefix] {
+                    commonPrefix += 1
+                }
+            }
+
+            // 末尾块做过 `trimTrailingSpacing`：
+            // 当旧末尾后面新长出块（或块数缩水后新末尾改变）时，倒数第一个公共块需要恢复/裁掉段后距。
+            var stableCount = commonPrefix
+            if canReusePrefix {
+                if stableCount == renderedBlocks.count, newBlocks.count > renderedBlocks.count {
+                    stableCount = max(0, stableCount - 1)
+                } else if stableCount == newBlocks.count, newBlocks.count < renderedBlocks.count {
+                    stableCount = max(0, stableCount - 1)
+                }
+            } else {
+                stableCount = 0
+            }
+
+            var stableUTF16 = 0
+            if stableCount > 0 {
+                for index in 0..<stableCount {
+                    stableUTF16 += renderedBlocks[index].utf16Length + (renderedBlocks[index].hasTrailingNewline ? 1 : 0)
+                }
+            }
+            let storage = view.textStorage
+            if stableUTF16 > storage.length {
+                stableCount = 0
+                stableUTF16 = 0
+            }
+
+            let reusable = renderedBlocks
+            var nextRendered: [RenderedBlock] = stableCount > 0 ? Array(reusable[0..<stableCount]) : []
+            nextRendered.reserveCapacity(newBlocks.count)
+
+            let tail = NSMutableAttributedString()
+            let suffixSlice = newBlocks[stableCount...]
+            for (offset, block) in suffixSlice.enumerated() {
+                let blockIndex = stableCount + offset
+                let segment: NSAttributedString
+                if canReusePrefix,
+                   blockIndex < reusable.count,
+                   reusable[blockIndex].block == block {
+                    segment = reusable[blockIndex].untrimmed
+                } else if let built = RichText.renderBlock(block, tone: tone, traits: traits) {
+                    segment = built
+                } else {
+                    continue
+                }
+                guard segment.length > 0 else { continue }
+                if tail.length > 0 {
+                    // 换行符继承上一块尾字符的段落样式，确保段后距作用在上一块结尾。
+                    let attrs = tail.attributes(at: tail.length - 1, effectiveRange: nil)
+                    tail.append(NSAttributedString(string: "\n", attributes: attrs))
+                    nextRendered[nextRendered.count - 1].hasTrailingNewline = true
+                }
+                tail.append(segment)
+                nextRendered.append(RenderedBlock(
+                    block: block,
+                    untrimmed: segment,
+                    utf16Length: segment.length,
+                    hasTrailingNewline: false
+                ))
+            }
+
+            // 末尾变空导致尾部长度为 0 时回退全量重设，避免前缀结尾残留多余换行。
+            if stableCount > 0, tail.length == 0 {
+                let full = content.attributedString(traits: traits)
+                styleKey = nil
+                renderedBlocks = []
+                view.attributedText = full
+                return
+            }
+
+            if tail.length > 0 {
+                RichText.trimTrailingSpacing(tail)
+            }
+
+            styleKey = nextStyle
+            renderedBlocks = nextRendered
+
+            if stableCount > 0, stableUTF16 <= storage.length {
+                let replaceRange = NSRange(location: stableUTF16, length: storage.length - stableUTF16)
+                storage.beginEditing()
+                storage.replaceCharacters(in: replaceRange, with: tail)
+                storage.endEditing()
+            } else {
+                view.attributedText = tail
+            }
+        }
 
         /// 长按菜单：拷贝 → 添加到会话框 → 搜索网页 排最前，「查询」去掉，其余照系统的。
         /// 没有输入框（拿不到回调）时原样不动。
@@ -264,6 +402,10 @@ enum RichText: Equatable {
     }
 
     /// 和 `MarkdownText` 里各块的 SwiftUI 样式对应：字号、行距、块间距 8。
+    static func renderBlock(_ block: MarkdownBlock, tone: TextTone, traits: UITraitCollection) -> NSAttributedString? {
+        markdown(block, tone: tone, traits: traits)
+    }
+
     private static func markdown(_ block: MarkdownBlock, tone: TextTone, traits: UITraitCollection) -> NSAttributedString? {
         let body = tone.font
         func inline(_ text: String, font: UIFont, color: UIColor) -> NSMutableAttributedString {
@@ -336,26 +478,62 @@ enum RichText: Equatable {
     }
 
     private static func inlineMarkdown(_ text: String, font: UIFont, color: UIColor) -> NSMutableAttributedString {
+        // 纯文本段落跳过 CommonMark 解析器（绝大多数中英文段落无行内语法标记）。
+        guard hasInlineMarkdownSyntax(text) else {
+            return NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
+        }
         let parsed = (try? AttributedString(
             markdown: text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace, failurePolicy: .returnPartiallyParsedIfPossible)
         )) ?? AttributedString(text)
-        let code = UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular)
+        var codeFont: UIFont?
+        var boldFont: UIFont?
+        var italicFont: UIFont?
+        var boldItalicFont: UIFont?
+
+        func styledFont(bold: Bool, italic: Bool) -> UIFont {
+            if bold && italic {
+                if let cached = boldItalicFont { return cached }
+                let resolved = derivedFont(from: font, traits: [.traitBold, .traitItalic])
+                boldItalicFont = resolved
+                return resolved
+            }
+            if bold {
+                if let cached = boldFont { return cached }
+                let resolved = derivedFont(from: font, traits: .traitBold)
+                boldFont = resolved
+                return resolved
+            }
+            if italic {
+                if let cached = italicFont { return cached }
+                let resolved = derivedFont(from: font, traits: .traitItalic)
+                italicFont = resolved
+                return resolved
+            }
+            return font
+        }
+
         let result = NSMutableAttributedString()
         for run in parsed.runs {
             let intent = run.inlinePresentationIntent ?? []
             var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             if intent.contains(.code) {
-                attributes[.font] = code
+                let mono = codeFont ?? {
+                    let created = UIFont.monospacedSystemFont(
+                        ofSize: UIFont.preferredFont(forTextStyle: .callout).pointSize,
+                        weight: .regular
+                    )
+                    codeFont = created
+                    return created
+                }()
+                attributes[.font] = mono
                 attributes[.foregroundColor] = Palette.uiKimi
                 attributes[.backgroundColor] = Palette.uiFill
             } else {
-                var traits: UIFontDescriptor.SymbolicTraits = []
-                if intent.contains(.stronglyEmphasized) { traits.insert(.traitBold) }
-                if intent.contains(.emphasized) { traits.insert(.traitItalic) }
-                if !traits.isEmpty,
-                   let descriptor = font.fontDescriptor.withSymbolicTraits(font.fontDescriptor.symbolicTraits.union(traits)) {
-                    attributes[.font] = UIFont(descriptor: descriptor, size: 0)
+                let bold = intent.contains(.stronglyEmphasized)
+                let italic = intent.contains(.emphasized)
+                if bold || italic {
+                    attributes[.font] = styledFont(bold: bold, italic: italic)
                 }
             }
             if intent.contains(.strikethrough) {
@@ -367,6 +545,34 @@ enum RichText: Equatable {
             result.append(NSAttributedString(string: String(parsed[run.range].characters), attributes: attributes))
         }
         return result
+    }
+
+    private static func hasInlineMarkdownSyntax(_ text: String) -> Bool {
+        for byte in text.utf8 {
+            switch byte {
+            case 0x2A, // *
+                 0x5F, // _
+                 0x60, // `
+                 0x5B, // [
+                 0x5D, // ]
+                 0x7E, // ~
+                 0x5C, // \
+                 0x3C, // <
+                 0x26, // &
+                 0x3A: // :
+                return true
+            default:
+                continue
+            }
+        }
+        return false
+    }
+
+    private static func derivedFont(from font: UIFont, traits: UIFontDescriptor.SymbolicTraits) -> UIFont {
+        guard let descriptor = font.fontDescriptor.withSymbolicTraits(font.fontDescriptor.symbolicTraits.union(traits)) else {
+            return font
+        }
+        return UIFont(descriptor: descriptor, size: 0)
     }
 
     private static func semibold(_ style: UIFont.TextStyle) -> UIFont {
@@ -399,7 +605,7 @@ enum RichText: Equatable {
     }
 
     /// 最后一段不要段后距，否则底下多出一截空白。
-    private static func trimTrailingSpacing(_ text: NSMutableAttributedString) {
+    static func trimTrailingSpacing(_ text: NSMutableAttributedString) {
         guard let last = paragraphRanges(text).last,
               let style = text.attribute(.paragraphStyle, at: last.location, effectiveRange: nil) as? NSParagraphStyle,
               let trimmed = style.mutableCopy() as? NSMutableParagraphStyle

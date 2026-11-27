@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 // MARK: - 视图模型
 //
@@ -7,8 +8,8 @@ import Foundation
 //   助手消息的 blocks → 连续的「思考 + 工具」合成一组（$At 的 activity-run）
 //   → 最后一段正文之前的全部折叠成「已工作 X」（FAt 的 TurnFold）
 
-struct ChatEntry: Identifiable, Sendable {
-    enum Kind: Sendable {
+struct ChatEntry: Identifiable, Sendable, Equatable {
+    enum Kind: Sendable, Equatable {
         case user(UserEntry)
         case assistant(AssistantEntry)
         case compaction(CompactionEntry)
@@ -23,7 +24,7 @@ struct ChatEntry: Identifiable, Sendable {
     }
 }
 
-struct UserEntry: Sendable {
+struct UserEntry: Sendable, Equatable {
     let id: String
     let text: String
     let attachments: [AttachmentRef]
@@ -49,7 +50,7 @@ struct AttachmentRef: Identifiable, Sendable, Hashable {
     }
 }
 
-struct CompactionEntry: Sendable {
+struct CompactionEntry: Sendable, Equatable {
     let id: String
     let auto: Bool
     let tokensBefore: Int?
@@ -57,18 +58,74 @@ struct CompactionEntry: Sendable {
     let summary: String?
 }
 
-struct AssistantEntry: Sendable {
+struct AssistantEntry: Sendable, Equatable {
     let id: String
-    var blocks: [ChatBlock]
+    var blocks: [ChatBlock] {
+        didSet { recomputeDerived() }
+    }
     var createdAt: Date?
     var endedAt: Date?
     var durationMs: Double?
     /// 所属 turn 的序号与状态（`daemonTurnId` / `daemonTurnState`）。
     var turnOrdinal: Int
     var turnState: String
+
+    // 预计算的展示拆分与标志，避免每次 SwiftUI body 评估重复切分和裁剪字符串。
+    private(set) var displayItems: [DisplayItem] = []
+    private(set) var foldedItems: [DisplayItem] = []
+    private(set) var visibleItems: [DisplayItem] = []
+    private(set) var hasContent = false
+    private(set) var earliestThinkingStart: Date?
+
+    init(
+        id: String,
+        blocks: [ChatBlock],
+        createdAt: Date? = nil,
+        endedAt: Date? = nil,
+        durationMs: Double? = nil,
+        turnOrdinal: Int,
+        turnState: String
+    ) {
+        self.id = id
+        self.blocks = blocks
+        self.createdAt = createdAt
+        self.endedAt = endedAt
+        self.durationMs = durationMs
+        self.turnOrdinal = turnOrdinal
+        self.turnState = turnState
+        recomputeDerived()
+    }
+
+    static func == (lhs: AssistantEntry, rhs: AssistantEntry) -> Bool {
+        lhs.id == rhs.id
+            && lhs.blocks == rhs.blocks
+            && lhs.createdAt == rhs.createdAt
+            && lhs.endedAt == rhs.endedAt
+            && lhs.durationMs == rhs.durationMs
+            && lhs.turnOrdinal == rhs.turnOrdinal
+            && lhs.turnState == rhs.turnState
+    }
+
+    private mutating func recomputeDerived() {
+        let items = Self.computeDisplayItems(from: blocks)
+        displayItems = items
+        let split = Self.computeFoldSplit(from: items)
+        foldedItems = split.folded
+        visibleItems = split.visible
+        hasContent = blocks.contains {
+            switch $0 {
+            case let .thinking(item): !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case let .text(_, text): !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case .tool, .notification: true
+            }
+        }
+        earliestThinkingStart = blocks.compactMap {
+            if case let .thinking(item) = $0 { item.startedAt } else { nil }
+        }.min()
+    }
 }
 
-enum ChatBlock: Sendable, Identifiable {
+enum ChatBlock: Sendable, Identifiable, Equatable {
     case thinking(ThinkingItem)
     case text(id: String, text: String)
     case tool(ToolItem)
@@ -84,36 +141,59 @@ enum ChatBlock: Sendable, Identifiable {
     }
 }
 
-struct ThinkingItem: Sendable, Identifiable {
+struct ThinkingItem: Sendable, Identifiable, Equatable {
     let id: String
     var text: String
     var startedAt: Date?
     var durationMs: Double?
 }
 
-struct ToolItem: Sendable, Identifiable {
-    enum Status: String, Sendable { case running, ok, error, cancelled }
+struct ToolItem: Sendable, Identifiable, Equatable {
+    enum Status: String, Sendable, Equatable { case running, ok, error, cancelled }
 
     let id: String
     let name: String
+    /// `Sr`：预计算的工具名归一化结果，避免每次渲染跑正则。
+    let kind: String
     let input: JSONValue?
     var output: [String]
     var status: Status
     var display: JSONValue?
 
-    /// `Sr`：工具名归一化。
-    var kind: String { ToolNames.normalize(name) }
+    init(
+        id: String,
+        name: String,
+        input: JSONValue?,
+        output: [String],
+        status: Status,
+        display: JSONValue? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.kind = ToolNames.normalize(name)
+        self.input = input
+        self.output = output
+        self.status = status
+        self.display = display
+    }
+}
+
+struct IndexedBlock: Sendable, Identifiable, Equatable {
+    let block: ChatBlock
+    let index: Int
+
+    var id: String { block.id }
 }
 
 /// 助手消息里要画的一项：单个块，或者一组「思考 + 工具」。
-enum DisplayItem: Identifiable, Sendable {
+enum DisplayItem: Identifiable, Sendable, Equatable {
     case block(ChatBlock, index: Int)
-    case activityRun([(ChatBlock, Int)])
+    case activityRun([IndexedBlock])
 
     var id: String {
         switch self {
         case let .block(block, _): block.id
-        case let .activityRun(items): "run:\(items.first?.0.id ?? "")"
+        case let .activityRun(items): "run:\(items.first?.block.id ?? "")"
         }
     }
 
@@ -121,26 +201,26 @@ enum DisplayItem: Identifiable, Sendable {
     var sourceIndex: Int {
         switch self {
         case let .block(_, index): index
-        case let .activityRun(items): items.first?.1 ?? -1
+        case let .activityRun(items): items.first?.index ?? -1
         }
     }
 
     var lastSourceIndex: Int {
         switch self {
         case let .block(_, index): index
-        case let .activityRun(items): items.last?.1 ?? -1
+        case let .activityRun(items): items.last?.index ?? -1
         }
     }
 }
 
 extension AssistantEntry {
     /// `$At`：连续的思考 / 工具（≥2 个）合成一组；正文、通知打断分组。
-    var displayItems: [DisplayItem] {
+    fileprivate static func computeDisplayItems(from blocks: [ChatBlock]) -> [DisplayItem] {
         var result: [DisplayItem] = []
-        var run: [(ChatBlock, Int)] = []
+        var run: [IndexedBlock] = []
         func flush() {
             if run.count == 1, let only = run.first {
-                result.append(.block(only.0, index: only.1))
+                result.append(.block(only.block, index: only.index))
             } else if run.count > 1 {
                 result.append(.activityRun(run))
             }
@@ -149,7 +229,7 @@ extension AssistantEntry {
         for (index, block) in blocks.enumerated() {
             switch block {
             case .thinking, .tool:
-                run.append((block, index))
+                run.append(IndexedBlock(block: block, index: index))
             case let .text(_, text) where text.isEmpty:
                 continue
             case .text, .notification:
@@ -163,7 +243,12 @@ extension AssistantEntry {
 
     /// `FAt`：最后一段正文之前的都折叠；没有正文就全部折叠。通知总在外面。
     var foldSplit: (folded: [DisplayItem], visible: [DisplayItem]) {
-        let items = displayItems
+        (foldedItems, visibleItems)
+    }
+
+    fileprivate static func computeFoldSplit(
+        from items: [DisplayItem]
+    ) -> (folded: [DisplayItem], visible: [DisplayItem]) {
         var split = -1
         for (index, item) in items.enumerated().reversed() {
             if case let .block(.text(_, text), _) = item, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -184,24 +269,9 @@ extension AssistantEntry {
 
     /// 复制按钮拷的内容：可见部分的正文。
     var visibleText: String {
-        foldSplit.visible.compactMap {
+        visibleItems.compactMap {
             if case let .block(.text(_, text), _) = $0 { text } else { nil }
         }.joined(separator: "\n\n")
-    }
-
-    var hasContent: Bool {
-        blocks.contains {
-            switch $0 {
-            case let .thinking(item): !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            case let .text(_, text): !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            case .tool, .notification: true
-            }
-        }
-    }
-
-    /// 最早的思考开始时间（`zAt`），给「已工作」计时兜底。
-    var earliestThinkingStart: Date? {
-        blocks.compactMap { if case let .thinking(item) = $0 { item.startedAt } else { nil } }.min()
     }
 }
 
@@ -209,7 +279,7 @@ extension AssistantEntry {
 
 /// 客户端对思考的计时（官方 `thinkingTiming`）：现场看到的思考用本地时钟量，
 /// 等你确认 / 回答的时间不算进去；没现场看到的退回 step 的起止时间。
-struct ThinkingTiming: Sendable {
+struct ThinkingTiming: Sendable, Equatable {
     var startedAt: Date
     var settledAt: Date?
 }
@@ -224,16 +294,21 @@ enum ConversationBuilder {
 
     /// 有待处理的确认 / 提问时，最后一个在跑的 step 视为「停住了」。
     static func pendingStepID(_ state: TranscriptState) -> String? {
-        guard state.interactions.values.contains(where: { $0.state == "pending" }),
-              let turn = state.turns.last(where: { $0.state == "running" }) else { return nil }
-        return turn.steps.last(where: { $0.state == "running" })?.stepId
+        guard state.interactions.values.contains(where: { $0.state == "pending" }) else { return nil }
+        for item in state.items.reversed() {
+            if case let .turn(turn) = item, turn.state == "running" {
+                return turn.steps.last(where: { $0.state == "running" })?.stepId
+            }
+        }
+        return nil
     }
 
     /// 每次重建前更新计时：新出现的流式思考记开始，不再流式的记结束（官方 `v_e` / `y_e`）。
     static func updateTiming(_ timing: inout [String: ThinkingTiming], state: TranscriptState, now: Date = .now) {
         let pending = pendingStepID(state)
         var seen = Set<String>()
-        for turn in state.turns {
+        for item in state.items {
+            guard case let .turn(turn) = item else { continue }
             for step in turn.steps {
                 for (index, frame) in step.frames.enumerated() where frame.kind == "thinking" {
                     seen.insert(frame.frameId)
@@ -246,66 +321,171 @@ enum ConversationBuilder {
                 }
             }
         }
-        timing = timing.filter { seen.contains($0.key) }
+        if timing.count > seen.count {
+            timing = timing.filter { seen.contains($0.key) }
+        }
     }
 
     static func build(_ state: TranscriptState, timing: [String: ThinkingTiming] = [:]) -> [ChatEntry] {
-        var accumulator = Accumulator(state: state, timing: timing)
-        let items = state.items
-        for (position, item) in items.enumerated() {
-            switch item {
-            case let .marker(marker):
-                guard marker.marker == "compaction", marker.payload?["phase"]?.stringValue == "completed" else { continue }
-                accumulator.flush()
-                let result = marker.payload?["result"]
-                accumulator.entries.append(ChatEntry(id: marker.markerId, kind: .compaction(CompactionEntry(
-                    id: marker.markerId,
-                    auto: compactionTrigger(before: position, in: items) != "manual",
-                    tokensBefore: result?["tokensBefore"]?.intValue,
-                    tokensAfter: result?["tokensAfter"]?.intValue,
-                    summary: result?["summary"]?.stringValue
-                ))))
-
-            case .taskref:
-                continue
-
-            case let .turn(turn):
-                accumulator.flush()
-                accumulator.append(turn)
-            }
+        let pendingStepID = pendingStepID(state)
+        let isTurnActive = state.isTurnActive
+        var entries: [ChatEntry] = []
+        for (position, item) in state.items.enumerated() {
+            entries.append(contentsOf: buildItem(
+                item,
+                at: position,
+                in: state,
+                timing: timing,
+                pendingStepID: pendingStepID,
+                isTurnActive: isTurnActive
+            ))
         }
-        accumulator.flush()
-        var entries = accumulator.entries
         markUndo(&entries)
         return entries
+    }
+
+    /// 构建单条 `TranscriptItem` 对应的 `ChatEntry` 切片（供按轮增量缓存复用）。
+    static func buildItem(
+        _ item: TranscriptItem,
+        at position: Int,
+        in state: TranscriptState,
+        timing: [String: ThinkingTiming],
+        pendingStepID: String?,
+        isTurnActive: Bool
+    ) -> [ChatEntry] {
+        switch item {
+        case let .marker(marker):
+            guard marker.marker == "compaction", marker.payload?["phase"]?.stringValue == "completed" else {
+                return []
+            }
+            let result = marker.payload?["result"]
+            return [ChatEntry(id: marker.markerId, kind: .compaction(CompactionEntry(
+                id: marker.markerId,
+                auto: compactionTrigger(before: position, in: state.items) != "manual",
+                tokensBefore: result?["tokensBefore"]?.intValue,
+                tokensAfter: result?["tokensAfter"]?.intValue,
+                summary: result?["summary"]?.stringValue
+            )))]
+
+        case .taskref:
+            return []
+
+        case let .turn(turn):
+            var accumulator = Accumulator(
+                state: state,
+                timing: timing,
+                pendingStepID: pendingStepID,
+                isTurnActive: isTurnActive
+            )
+            accumulator.append(turn)
+            accumulator.flush()
+            return accumulator.entries
+        }
+    }
+
+    /// 解析当前是否存在可走 `LiveStreamStore` 零重建快路径的活跃正文/思考尾块。
+    static func liveAnchor(
+        state: TranscriptState,
+        entries: [ChatEntry],
+        isWorking: Bool
+    ) -> LiveStreamAnchor? {
+        guard isWorking,
+              let turn = state.lastTurn,
+              case let .assistant(assistant)? = entries.last?.kind,
+              assistant.turnOrdinal == turn.ordinal,
+              let lastStep = turn.steps.last(where: { !$0.frames.isEmpty }),
+              let lastFrame = lastStep.frames.last else { return nil }
+
+        let frameText = lastFrame.text ?? ""
+        guard !frameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+
+        switch lastFrame.kind {
+        case "text" where lastFrame.role != "user":
+            guard case let .text(blockID, fullText)? = assistant.blocks.last,
+                  fullText.hasSuffix(frameText) else { return nil }
+            let prefix = String(fullText.dropLast(frameText.count))
+            return LiveStreamAnchor(
+                turnID: turn.turnId,
+                stepID: lastStep.stepId,
+                frameID: lastFrame.frameId,
+                blockID: blockID,
+                kind: .text,
+                prefix: prefix,
+                frameText: frameText
+            )
+
+        case "thinking":
+            guard case let .thinking(item)? = assistant.blocks.last,
+                  item.durationMs == nil,
+                  item.text.hasSuffix(frameText) else { return nil }
+            let prefix = String(item.text.dropLast(frameText.count))
+            return LiveStreamAnchor(
+                turnID: turn.turnId,
+                stepID: lastStep.stepId,
+                frameID: lastFrame.frameId,
+                blockID: item.id,
+                kind: .thinking,
+                prefix: prefix,
+                frameText: frameText
+            )
+
+        default:
+            return nil
+        }
+    }
+
+    private struct DraftAssistant {
+        let id: String
+        var blocks: [ChatBlock]
+        var createdAt: Date?
+        var endedAt: Date?
+        var durationMs: Double?
+        var turnOrdinal: Int
+        var turnState: String
     }
 
     private struct Accumulator {
         let state: TranscriptState
         let timing: [String: ThinkingTiming]
         let pendingStepID: String?
+        let isTurnActive: Bool
         var entries: [ChatEntry] = []
-        var current: AssistantEntry?
+        var current: DraftAssistant?
 
-        init(state: TranscriptState, timing: [String: ThinkingTiming]) {
+        init(
+            state: TranscriptState,
+            timing: [String: ThinkingTiming],
+            pendingStepID: String?,
+            isTurnActive: Bool
+        ) {
             self.state = state
             self.timing = timing
-            pendingStepID = ConversationBuilder.pendingStepID(state)
+            self.pendingStepID = pendingStepID
+            self.isTurnActive = isTurnActive
         }
 
         mutating func flush() {
-            guard var entry = current else { return }
+            guard var draft = current else { return }
             current = nil
-            guard !entry.blocks.isEmpty else { return }
+            guard !draft.blocks.isEmpty else { return }
             // 轮次已结束（或不是最后一条）时，仍标着 running 的工具按完成画（C6 的 f()）。
-            if !(state.isTurnActive && entry.turnState == "running") {
-                for index in entry.blocks.indices {
-                    if case var .tool(tool) = entry.blocks[index], tool.status == .running {
+            if !(isTurnActive && draft.turnState == "running") {
+                for index in draft.blocks.indices {
+                    if case var .tool(tool) = draft.blocks[index], tool.status == .running {
                         tool.status = .ok
-                        entry.blocks[index] = .tool(tool)
+                        draft.blocks[index] = .tool(tool)
                     }
                 }
             }
+            let entry = AssistantEntry(
+                id: draft.id,
+                blocks: draft.blocks,
+                createdAt: draft.createdAt,
+                endedAt: draft.endedAt,
+                durationMs: draft.durationMs,
+                turnOrdinal: draft.turnOrdinal,
+                turnState: draft.turnState
+            )
             entries.append(ChatEntry(id: entry.id, kind: .assistant(entry)))
         }
 
@@ -317,7 +497,7 @@ enum ConversationBuilder {
 
         private mutating func ensureAssistant(_ id: String, turn: TranscriptTurn, createdAt: Date?) {
             if current == nil {
-                current = AssistantEntry(
+                current = DraftAssistant(
                     id: id, blocks: [], createdAt: createdAt, turnOrdinal: turn.ordinal, turnState: turn.state
                 )
             }
@@ -597,10 +777,21 @@ enum ConversationBuilder {
 
     // MARK: 时间
 
+    private static let isoWithFraction = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let isoPlain = Date.ISO8601FormatStyle()
+    private static let dateCache = Mutex<[String: Date]>([:])
+
     static func parse(_ text: String?) -> Date? {
         guard let text, !text.isEmpty else { return nil }
-        if let date = try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(text) { return date }
-        return try? Date.ISO8601FormatStyle().parse(text)
+        if let hit = dateCache.withLock({ $0[text] }) { return hit }
+        let parsed = (try? isoWithFraction.parse(text)) ?? (try? isoPlain.parse(text))
+        if let parsed {
+            dateCache.withLock { cache in
+                if cache.count > 1024 { cache.removeAll(keepingCapacity: true) }
+                cache[text] = parsed
+            }
+        }
+        return parsed
     }
 
     static func earliest(_ values: [String?]) -> Date? {
@@ -629,8 +820,21 @@ enum ToolNames {
     ]
 
     static func normalize(_ name: String) -> String {
-        let key = name.trimmingCharacters(in: .whitespaces).lowercased()
-            .replacingOccurrences(of: "[\\s-]+", with: "_", options: .regularExpression)
+        let trimmed = name.trimmingCharacters(in: .whitespaces).lowercased()
+        var key = ""
+        key.reserveCapacity(trimmed.utf8.count)
+        var lastWasSeparator = false
+        for char in trimmed {
+            if char == "-" || char.isWhitespace {
+                if !lastWasSeparator {
+                    key.append("_")
+                    lastWasSeparator = true
+                }
+            } else {
+                key.append(char)
+                lastWasSeparator = false
+            }
+        }
         return aliases[key] ?? key
     }
 

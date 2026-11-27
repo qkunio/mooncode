@@ -8,16 +8,19 @@ import SwiftUI
 @MainActor
 @Observable
 final class TranscriptUIState {
-    /// 每个开关各自是一个可观察对象，只有读了这个 key 的视图会重绘。
-    /// 全放在一个可观察的字典里的话，点开任何一个，整条对话（含所有 Markdown）都要重算，展开会卡。
+    /// 每个开关与计时各自是一个可观察对象，只有读了这个 key 的视图会重绘。
+    /// 全放在一个可观察的字典里的话，点开任何一个或任一组计时变化，整条对话都要重算。
     @ObservationIgnored private var toggles: [String: Toggle] = [:]
-    /// 进行中的一组「思考 + 工具」量出来的耗时，结束后显示在摘要尾部。
-    var runDurations: [String: Double] = [:]
-    var runStarts: [String: Date] = [:]
+    @ObservationIgnored private var timings: [String: RunTiming] = [:]
 
     func isOpen(_ key: String, default value: Bool) -> Bool { toggle(key).value ?? value }
     func override(_ key: String) -> Bool? { toggle(key).value }
     func set(_ key: String, _ value: Bool?) { toggle(key).value = value }
+
+    func runStart(_ key: String) -> Date? { timing(key).start }
+    func setRunStart(_ key: String, _ date: Date?) { timing(key).start = date }
+    func runDuration(_ key: String) -> Double? { timing(key).durationMs }
+    func setRunDuration(_ key: String, _ ms: Double?) { timing(key).durationMs = ms }
 
     private func toggle(_ key: String) -> Toggle {
         if let existing = toggles[key] { return existing }
@@ -26,9 +29,22 @@ final class TranscriptUIState {
         return created
     }
 
+    private func timing(_ key: String) -> RunTiming {
+        if let existing = timings[key] { return existing }
+        let created = RunTiming()
+        timings[key] = created
+        return created
+    }
+
     @Observable
     final class Toggle {
         var value: Bool?
+    }
+
+    @Observable
+    final class RunTiming {
+        var start: Date?
+        var durationMs: Double?
     }
 }
 
@@ -45,7 +61,7 @@ struct ConversationList: View {
         let interruptedID = interruptedEntryID(entries)
         let faceInFooterID = idleFaceFooterID(entries)
 
-        if chat.transcript.hasMoreOlder || chat.isLoadingOlder {
+        if chat.hasMoreOlder || chat.isLoadingOlder {
             LoadOlderRow(loading: chat.isLoadingOlder) {
                 Task { await chat.loadOlder() }
             }
@@ -61,17 +77,22 @@ struct ConversationList: View {
                         loadAttachment: { try await chat.attachmentData($0) },
                         undo: { confirmUndo(user) }
                     )
+                    .equatable()
                 case let .compaction(compaction):
                     CompactionDivider(entry: compaction)
+                        .equatable()
                 case let .assistant(assistant):
+                    let isLive = assistant.id == liveID
                     AssistantMessageView(
                         entry: assistant,
                         ui: ui,
-                        live: assistant.id == liveID,
-                        streamingTail: assistant.id == liveID ? streamingTail(assistant) : nil,
-                        showFooter: assistant.id != liveID && isLastOfRun(index, in: entries),
+                        live: isLive,
+                        streamingTail: isLive ? streamingTail(assistant) : nil,
+                        liveStream: isLive ? chat.liveStream : nil,
+                        showFooter: !isLive && isLastOfRun(index, in: entries),
                         showsIdleFace: assistant.id == faceInFooterID
                     )
+                    .equatable()
                     if assistant.id == interruptedID {
                         LabeledDivider(text: "已手动终止")
                             .padding(.top, 18)
@@ -207,11 +228,15 @@ private extension View {
     }
 }
 
-struct UserTurnView: View {
+struct UserTurnView: View, Equatable {
     let entry: UserEntry
     let canUndo: Bool
     let loadAttachment: @MainActor (AttachmentRef) async throws -> Data
     let undo: () -> Void
+
+    nonisolated static func == (lhs: UserTurnView, rhs: UserTurnView) -> Bool {
+        lhs.entry == rhs.entry && lhs.canUndo == rhs.canUndo
+    }
 
     @State private var expanded = false
     @State private var copied = false
@@ -426,15 +451,25 @@ private struct OptimisticPromptRow: View {
 
 // MARK: - 助手消息
 
-struct AssistantMessageView: View {
+struct AssistantMessageView: View, Equatable {
     let entry: AssistantEntry
     let ui: TranscriptUIState
     let live: Bool
     let streamingTail: Int?
+    let liveStream: LiveStreamStore?
     let showFooter: Bool
     var showsIdleFace = false
 
     @State private var copied = false
+
+    nonisolated static func == (lhs: AssistantMessageView, rhs: AssistantMessageView) -> Bool {
+        lhs.entry == rhs.entry
+            && lhs.live == rhs.live
+            && lhs.streamingTail == rhs.streamingTail
+            && lhs.liveStream === rhs.liveStream
+            && lhs.showFooter == rhs.showFooter
+            && lhs.showsIdleFace == rhs.showsIdleFace
+    }
 
     var body: some View {
         let split = entry.foldSplit
@@ -445,11 +480,12 @@ struct AssistantMessageView: View {
                     items: split.folded,
                     ui: ui,
                     live: live,
-                    streamingTail: streamingTail
+                    streamingTail: streamingTail,
+                    liveStream: liveStream
                 )
             }
             ForEach(Array(split.visible.enumerated()), id: \.element.id) { index, item in
-                DisplayItemView(item: item, ui: ui, streamingTail: streamingTail)
+                DisplayItemView(item: item, ui: ui, streamingTail: streamingTail, liveStream: liveStream)
                     .padding(.top, index == 0 && split.folded.isEmpty ? 0 : spacing(before: item))
             }
             if showFooter, entry.hasContent {
@@ -488,17 +524,22 @@ struct DisplayItemView: View {
     let item: DisplayItem
     let ui: TranscriptUIState
     let streamingTail: Int?
+    let liveStream: LiveStreamStore?
 
     var body: some View {
         switch item {
         case let .block(block, index):
-            BlockView(block: block, ui: ui, streaming: streamingTail == index)
+            let isStreaming = streamingTail == index
+            BlockView(block: block, ui: ui, streaming: isStreaming, liveStream: isStreaming ? liveStream : nil)
         case let .activityRun(items):
+            let isStreaming = streamingTail != nil && items.last?.index == streamingTail
             ActivityRunView(
                 items: items,
                 ui: ui,
-                streaming: streamingTail != nil && items.last?.1 == streamingTail
+                streaming: isStreaming,
+                liveStream: isStreaming ? liveStream : nil
             )
+            .equatable()
         }
     }
 }
@@ -507,18 +548,54 @@ struct BlockView: View {
     let block: ChatBlock
     let ui: TranscriptUIState
     let streaming: Bool
+    let liveStream: LiveStreamStore?
 
     var body: some View {
         switch block {
-        case let .text(_, text):
-            MarkdownText(text: text)
+        case let .text(id, text):
+            if streaming, let liveStream {
+                StreamingMarkdownBlock(blockID: id, fallbackText: text, liveStream: liveStream)
+            } else {
+                MarkdownText(text: text).equatable()
+            }
         case let .thinking(item):
-            ThinkingBlockView(item: item, streaming: streaming && item.durationMs == nil)
+            if streaming, item.durationMs == nil, let liveStream {
+                StreamingThinkingBlock(item: item, liveStream: liveStream)
+            } else {
+                ThinkingBlockView(item: item, streaming: streaming && item.durationMs == nil).equatable()
+            }
         case let .tool(tool):
-            ToolLineView(tool: tool, ui: ui)
+            ToolLineView(tool: tool, ui: ui).equatable()
         case let .notification(_, title, body, failed):
             NotificationRow(title: title, bodyText: body, failed: failed)
         }
+    }
+}
+
+/// 独立订阅 `LiveStreamStore` 的正文叶视图：流式 token 到达时只有这个叶视图会重算。
+private struct StreamingMarkdownBlock: View {
+    let blockID: String
+    let fallbackText: String
+    let liveStream: LiveStreamStore
+
+    var body: some View {
+        let active = liveStream.activeBlockID == blockID && liveStream.kind == .text
+        let text = active ? liveStream.text : fallbackText
+        MarkdownText(text: text, isStreaming: true)
+    }
+}
+
+/// 独立订阅 `LiveStreamStore` 的思考叶视图：思考流式输出时不触发父列表与历史消息重绘。
+private struct StreamingThinkingBlock: View {
+    let item: ThinkingItem
+    let liveStream: LiveStreamStore
+
+    var body: some View {
+        let active = liveStream.activeBlockID == item.id && liveStream.kind == .thinking
+        let liveItem = active
+            ? ThinkingItem(id: item.id, text: liveStream.text, startedAt: item.startedAt, durationMs: item.durationMs)
+            : item
+        ThinkingBlockView(item: liveItem, streaming: true)
     }
 }
 
@@ -530,6 +607,7 @@ struct TurnFoldView: View {
     let ui: TranscriptUIState
     let live: Bool
     let streamingTail: Int?
+    let liveStream: LiveStreamStore?
 
     private var key: String { "fold:\(entry.id)" }
     private var streaming: Bool { streamingTail != nil }
@@ -561,7 +639,7 @@ struct TurnFoldView: View {
             if open {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        DisplayItemView(item: item, ui: ui, streamingTail: streamingTail)
+                        DisplayItemView(item: item, ui: ui, streamingTail: streamingTail, liveStream: liveStream)
                             .padding(.top, index == 0 ? (streaming ? 0 : 12) : spacing(before: item))
                     }
                 }
@@ -599,17 +677,22 @@ struct TurnFoldView: View {
 
 // MARK: - 一组「思考 + 工具」
 
-struct ActivityRunView: View {
-    let items: [(ChatBlock, Int)]
+struct ActivityRunView: View, Equatable {
+    let items: [IndexedBlock]
     let ui: TranscriptUIState
     let streaming: Bool
+    let liveStream: LiveStreamStore?
 
-    private var key: String { "run:\(items.first?.0.id ?? "")" }
+    nonisolated static func == (lhs: ActivityRunView, rhs: ActivityRunView) -> Bool {
+        lhs.items == rhs.items && lhs.streaming == rhs.streaming && lhs.liveStream === rhs.liveStream
+    }
+
+    private var key: String { "run:\(items.first?.block.id ?? "")" }
 
     private enum Status: Equatable { case running, error, done }
 
     private var tools: [ToolItem] {
-        items.compactMap { if case let .tool(tool) = $0.0 { tool } else { nil } }
+        items.compactMap { if case let .tool(tool) = $0.block { tool } else { nil } }
     }
 
     private var status: Status {
@@ -620,8 +703,8 @@ struct ActivityRunView: View {
 
     /// `s`：流式中的思考，或最后一个还在跑的工具。
     private var current: ChatBlock? {
-        if streaming, case .thinking? = items.last?.0 { return items.last?.0 }
-        return items.last { if case let .tool(tool) = $0.0 { tool.status == .running } else { false } }?.0
+        if streaming, case .thinking? = items.last?.block { return items.last?.block }
+        return items.last { if case let .tool(tool) = $0.block { tool.status == .running } else { false } }?.block
     }
 
     var body: some View {
@@ -649,11 +732,13 @@ struct ActivityRunView: View {
 
             if open {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(items, id: \.0.id) { block, _ in
+                    ForEach(items) { item in
+                        let isBlockStreaming = streaming && item.block.id == items.last?.block.id
                         BlockView(
-                            block: block,
+                            block: item.block,
                             ui: ui,
-                            streaming: streaming && block.id == items.last?.0.id
+                            streaming: isBlockStreaming,
+                            liveStream: isBlockStreaming ? liveStream : nil
                         )
                     }
                 }
@@ -661,22 +746,22 @@ struct ActivityRunView: View {
                 .transition(.opacity)
             }
         }
-        .onAppear { if status == .running, ui.runStarts[key] == nil { ui.runStarts[key] = startDate ?? .now } }
+        .onAppear { if status == .running, ui.runStart(key) == nil { ui.setRunStart(key, startDate ?? .now) } }
         .onChange(of: status) { old, new in
             // 开始跑时展开、跑完收起（官方：状态切换会覆盖手动开合）。
             ui.set(key, nil)
             if new == .running {
-                ui.runStarts[key] = startDate ?? .now
-                ui.runDurations[key] = nil
-            } else if old == .running, let start = ui.runStarts[key] {
-                ui.runDurations[key] = Date.now.timeIntervalSince(start) * 1000
-                ui.runStarts[key] = nil
+                ui.setRunStart(key, startDate ?? .now)
+                ui.setRunDuration(key, nil)
+            } else if old == .running, let start = ui.runStart(key) {
+                ui.setRunDuration(key, Date.now.timeIntervalSince(start) * 1000)
+                ui.setRunStart(key, nil)
             }
         }
     }
 
     private var startDate: Date? {
-        items.compactMap { if case let .thinking(item) = $0.0 { item.startedAt } else { nil } }.min()
+        items.compactMap { if case let .thinking(item) = $0.block { item.startedAt } else { nil } }.min()
     }
 
     private func summaryText(now: Date?) -> Text {
@@ -684,13 +769,13 @@ struct ActivityRunView: View {
         if status == .running {
             let done = tools.filter { $0.status != .running && $0.id != current?.id }
             var live = ToolNames.liveSummary(current: current, done: done)
-            if let now, let start = ui.runStarts[key] ?? startDate,
+            if let now, let start = ui.runStart(key) ?? startDate,
                let elapsed = Durations.format(now.timeIntervalSince(start) * 1000), !elapsed.isEmpty {
                 live.append(.init(text: elapsed, faint: true))
             }
             clauses = live
         } else {
-            clauses = ToolNames.settledSummary(tools, durationMs: ui.runDurations[key])
+            clauses = ToolNames.settledSummary(tools, durationMs: ui.runDuration(key))
         }
         var result = Text("")
         for (index, clause) in clauses.enumerated() {
@@ -711,11 +796,15 @@ extension Animation {
 /// 思考块。
 ///   - 进行中：一行「〰 思考中 最新的那句话」，涂鸦线一笔笔画出来再擦掉，循环；不能点开；那句话放不下时跟着往外吐的字往左滚。
 ///   - 结束后：「〰 已思考 N秒 第一句话… ›」，涂鸦线静止，点一下从底部弹出全文，标题「思考了 N秒」。
-struct ThinkingBlockView: View {
+struct ThinkingBlockView: View, Equatable {
     let item: ThinkingItem
     let streaming: Bool
 
     @State private var isShowingDetail = false
+
+    nonisolated static func == (lhs: ThinkingBlockView, rhs: ThinkingBlockView) -> Bool {
+        lhs.item == rhs.item && lhs.streaming == rhs.streaming
+    }
 
     var body: some View {
         if streaming {
@@ -765,18 +854,41 @@ struct ThinkingBlockView: View {
         return "\(minutes / 60)小时" + (minutes % 60 == 0 ? "" : "\(minutes % 60)分")
     }
 
-    /// 正在写的那一行（最后一个非空行），去掉 Markdown 记号。
+    /// 正在写的那一行（最后一个非空行），逆向 O(末行长度) 扫描，避免对上万字思考全文 split。
     static func latestLine(_ text: String) -> String {
-        let line = text.split(separator: "\n", omittingEmptySubsequences: true)
-            .last { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
-        return plain(String(line))
+        var end = text.endIndex
+        while end > text.startIndex {
+            let prev = text.index(before: end)
+            let char = text[prev]
+            if char == "\n" || char == "\r" || char.isWhitespace {
+                end = prev
+            } else {
+                break
+            }
+        }
+        guard end > text.startIndex else { return "" }
+        var start = end
+        while start > text.startIndex {
+            let prev = text.index(before: start)
+            if text[prev] == "\n" { break }
+            start = prev
+        }
+        return plain(String(text[start..<end]))
     }
 
-    /// 结束后那一行显示的摘要：第一个非空行。
+    /// 结束后那一行显示的摘要：第一个非空行，正向 O(首行长度) 扫描。
     static func headline(_ text: String) -> String {
-        let line = text.split(separator: "\n", omittingEmptySubsequences: true)
-            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
-        return plain(String(line))
+        var cursor = text.startIndex
+        while cursor < text.endIndex {
+            let lineEnd = text[cursor...].firstIndex(of: "\n") ?? text.endIndex
+            let slice = text[cursor..<lineEnd]
+            if !slice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return plain(String(slice))
+            }
+            guard lineEnd < text.endIndex else { break }
+            cursor = text.index(after: lineEnd)
+        }
+        return ""
     }
 
     private static func plain(_ line: String) -> String {
@@ -815,12 +927,13 @@ private struct ThinkingIcon: View {
 }
 
 /// 思考中那一句：放得下就静止；放不下时先停一下让人看到开头，再平滑地往左追到最新的字，
-/// 字还在往外吐就一直跟着。离得越远追得越快，快追上时慢下来，不会一顿一顿地跳。
+/// 字还在往外吐就一直跟着。离得越远追得越快，快追上时慢下来，追上后自动暂停时钟不空转。
 private struct ThinkingTicker: View {
     let text: String
 
     @State private var textWidth: CGFloat = 0
     @State private var boxWidth: CGFloat = 0
+    @State private var isSettled = false
     @State private var motion = Motion()
 
     /// 每帧推进的位置放在引用类型里：滚动是每帧在变的，不该触发重绘。
@@ -835,17 +948,17 @@ private struct ThinkingTicker: View {
             holdUntil = .now.addingTimeInterval(hold)
         }
 
-        func advance(to now: Date, target: CGFloat) -> CGFloat {
+        func advance(to now: Date, target: CGFloat) -> (offset: CGFloat, settled: Bool) {
             defer { lastTick = now }
             guard target > offset else {
                 offset = max(0, target)
-                return offset
+                return (offset, true)
             }
-            guard now >= holdUntil, let last = lastTick else { return offset }
+            guard now >= holdUntil, let last = lastTick else { return (offset, false) }
             let dt = CGFloat(min(now.timeIntervalSince(last), 0.1))
             let speed = max(40, (target - offset) * 3)
             offset = min(target, offset + speed * dt)
-            return offset
+            return (offset, target - offset <= 0.5)
         }
     }
 
@@ -856,12 +969,18 @@ private struct ThinkingTicker: View {
             .hidden()
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .leading) {
-                TimelineView(.animation(paused: overflow <= 0)) { context in
-                    let offset = motion.advance(to: context.date, target: overflow)
+                TimelineView(.animation(paused: overflow <= 0 || isSettled)) { context in
+                    let step = motion.advance(to: context.date, target: overflow)
+                    let offset = step.offset
                     Text(text)
                         .lineLimit(1)
                         .fixedSize()
-                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                            textWidth = width
+                            if max(0, width - boxWidth) > motion.offset + 0.5 {
+                                isSettled = false
+                            }
+                        }
                         .offset(x: -offset)
                         .frame(width: boxWidth, alignment: .leading)
                         .mask {
@@ -874,14 +993,26 @@ private struct ThinkingTicker: View {
                                     .frame(width: offset < overflow - 0.5 ? 24 : 0)
                             }
                         }
+                        .onChange(of: step.settled) { _, settled in
+                            if settled { isSettled = true }
+                        }
                 }
             }
             .clipped()
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
-            .onAppear { motion.reset(hold: 0.6) }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                boxWidth = width
+                if max(0, textWidth - width) > motion.offset + 0.5 {
+                    isSettled = false
+                }
+            }
+            .onAppear {
+                motion.reset(hold: 0.6)
+                isSettled = false
+            }
             .onChange(of: text) { old, new in
-                // 换了一句（不是在原来那句后面接着写）：从头开始。
+                // 换了一句（不是在原来那句后面接着写）：从头开始；接在后面写则唤醒继续追。
                 if !new.hasPrefix(old) { motion.reset(hold: 0.6) }
+                isSettled = false
             }
     }
 }
@@ -958,14 +1089,20 @@ private struct ThinkingDetailSheet: View {
 
 // MARK: - 工具行
 
-struct ToolLineView: View {
+struct ToolLineView: View, Equatable {
     let tool: ToolItem
     let ui: TranscriptUIState
+
+    nonisolated static func == (lhs: ToolLineView, rhs: ToolLineView) -> Bool {
+        lhs.tool == rhs.tool
+    }
 
     private var key: String { "tool:\(tool.id)" }
 
     var body: some View {
-        let expandable = isExpandable
+        let isEditKind = tool.kind == "edit" || tool.kind == "multi_edit" || tool.kind == "write"
+        let diffLines = isEditKind ? ToolNames.diffLines(tool) : []
+        let expandable = isExpandable(diffLines: diffLines)
         let open = expandable && ui.isOpen(key, default: false)
         VStack(alignment: .leading, spacing: 0) {
             Button {
@@ -976,7 +1113,7 @@ struct ToolLineView: View {
                     Image(systemName: ToolNames.symbol(tool.name))
                         .font(.footnote)
                         .frame(width: 20)
-                    headline(open: open)
+                    headline(open: open, diffLines: diffLines)
                     if expandable { Chevron(open: open) }
                     Spacer(minLength: 4)
                     statusView
@@ -991,7 +1128,7 @@ struct ToolLineView: View {
 
             if open {
                 IndentedBody {
-                    ToolBody(tool: tool)
+                    ToolBody(tool: tool, cachedDiffLines: isEditKind ? diffLines : nil)
                         .padding(.vertical, 6)
                 }
                 .transition(.opacity)
@@ -1000,11 +1137,11 @@ struct ToolLineView: View {
     }
 
     @ViewBuilder
-    private func headline(open: Bool) -> some View {
+    private func headline(open: Bool, diffLines: [ToolNames.DiffLine]) -> some View {
         switch tool.kind {
         case "edit", "multi_edit", "write":
             let path = ToolNames.summary(tool)
-            let stats = ToolNames.diffStats(tool)
+            let stats = diffStats(from: diffLines)
             HStack(spacing: 6) {
                 Text(tool.kind == "write" ? "写入" : "编辑")
                 if !open {
@@ -1014,7 +1151,9 @@ struct ToolLineView: View {
                     if stats.added > 0 { Text("+\(stats.added)").foregroundStyle(Palette.diffAdd) }
                     if stats.removed > 0 { Text("−\(stats.removed)").foregroundStyle(Palette.diffDel) }
                 }
-                if let chip = ToolNames.chip(tool) { Text(chip).foregroundStyle(.tertiary) }
+                if stats.added == 0, stats.removed == 0, tool.kind == "write", tool.status == .ok {
+                    Text("已创建").foregroundStyle(.tertiary)
+                }
             }
         case "read":
             // 官方 ReadTool：文件名 + 目录（淡）+ 行号范围（淡）+ 行数。
@@ -1064,6 +1203,20 @@ struct ToolLineView: View {
         }
     }
 
+    private func diffStats(from lines: [ToolNames.DiffLine]) -> (added: Int, removed: Int) {
+        guard tool.status != .error else { return (0, 0) }
+        if !lines.isEmpty {
+            var added = 0
+            var removed = 0
+            for line in lines {
+                if line.kind == .add { added += 1 }
+                else if line.kind == .del { removed += 1 }
+            }
+            return (added, removed)
+        }
+        return ToolNames.diffStats(tool)
+    }
+
     @ViewBuilder
     private var statusView: some View {
         switch tool.status {
@@ -1079,13 +1232,13 @@ struct ToolLineView: View {
     }
 
     /// 各工具「有没有可展开的内容」，与官方各 *Tool 的 expandable 条件一致。
-    private var isExpandable: Bool {
+    private func isExpandable(diffLines: [ToolNames.DiffLine]) -> Bool {
         let hasOutput = !tool.output.isEmpty
         switch tool.kind {
         case "bash":
             return hasOutput || tool.status == .running || !ToolNames.summary(tool).isEmpty
         case "edit", "multi_edit", "write":
-            return !ToolNames.diffLines(tool).isEmpty || hasOutput
+            return !diffLines.isEmpty || hasOutput
         case "grep", "search":
             return tool.output.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         case "read":
@@ -1100,13 +1253,14 @@ struct ToolLineView: View {
 /// 工具展开后的面板（官方 ToolPanel：浅底、圆角 8、标题 + 复制、输出最多约 12 行可滚）。
 private struct ToolBody: View {
     let tool: ToolItem
+    var cachedDiffLines: [ToolNames.DiffLine]? = nil
 
     @State private var copied = false
 
     var body: some View {
         switch tool.kind {
         case "edit", "multi_edit", "write":
-            let lines = ToolNames.diffLines(tool)
+            let lines = cachedDiffLines ?? ToolNames.diffLines(tool)
             panel(
                 title: ToolNames.summary(tool),
                 meta: nil,
@@ -1404,10 +1558,14 @@ extension LabeledDivider where Label == Text {
     }
 }
 
-private struct CompactionDivider: View {
+private struct CompactionDivider: View, Equatable {
     let entry: CompactionEntry
 
     @State private var isShowingSummary = false
+
+    nonisolated static func == (lhs: CompactionDivider, rhs: CompactionDivider) -> Bool {
+        lhs.entry == rhs.entry
+    }
 
     var body: some View {
         LabeledDivider {
@@ -1530,24 +1688,43 @@ struct WorkingIndicator: View {
 struct KimiFace: View {
     let animating: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var glance: CGFloat = 0
+    @State private var blink: CGFloat = 1
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: !animating)) { context in
-            let phase = animating ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.4) / 2.4 : 0
-            // 2.4s 一个周期：中段左右瞄一眼，末尾眨一下眼。
-            let glance: CGFloat = phase > 0.35 && phase < 0.6 ? 2 : 0
-            let blink: CGFloat = phase > 0.9 && phase < 0.96 ? 0.2 : 1
-            RoundedRectangle(cornerRadius: 2.3)
-                .fill(Palette.kimi)
-                .frame(width: 24, height: 16)
-                .overlay {
-                    HStack(spacing: 6) {
-                        eye(blink)
-                        eye(blink)
-                    }
-                    .offset(x: 2.7 + glance, y: -2.8)
+        RoundedRectangle(cornerRadius: 2.3)
+            .fill(Palette.kimi)
+            .frame(width: 24, height: 16)
+            .overlay {
+                HStack(spacing: 6) {
+                    eye(blink)
+                    eye(blink)
                 }
-        }
-        .accessibilityHidden(true)
+                .offset(x: 2.7 + glance, y: -2.8)
+            }
+            .task(id: animating && !reduceMotion) {
+                glance = 0
+                blink = 1
+                guard animating, !reduceMotion else { return }
+                // 2.4s 关键帧周期：中段左右瞄一眼，末尾轻眨一次，替代 30fps 空转轮询。
+                while !Task.isCancelled {
+                    do {
+                        try await Task.sleep(for: .milliseconds(840))
+                        withAnimation(.easeInOut(duration: 0.14)) { glance = 2 }
+                        try await Task.sleep(for: .milliseconds(600))
+                        withAnimation(.easeInOut(duration: 0.14)) { glance = 0 }
+                        try await Task.sleep(for: .milliseconds(720))
+                        withAnimation(.easeInOut(duration: 0.07)) { blink = 0.2 }
+                        try await Task.sleep(for: .milliseconds(140))
+                        withAnimation(.easeInOut(duration: 0.08)) { blink = 1 }
+                        try await Task.sleep(for: .milliseconds(100))
+                    } catch {
+                        return
+                    }
+                }
+            }
+            .accessibilityHidden(true)
     }
 
     private func eye(_ scale: CGFloat) -> some View {

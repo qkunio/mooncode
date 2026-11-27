@@ -61,6 +61,25 @@ actor EventStream {
     private let clientID: String
     private let wireProtocol: TranscriptProtocol
     private let logger = Logger(subsystem: "com.qinkun.kimicode", category: "ws")
+    private let decoder = JSONDecoder()
+    private let encoder = JSONEncoder()
+
+    /// 轻量帧头：先只解出分发所需的 3 个字段，避免高频流式帧反复在 JSONValue 树上编解码。
+    private struct FrameHeader: Decodable {
+        let type: String
+        let sessionID: String?
+        let agentID: String?
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case sessionID = "session_id"
+            case agentID = "agent_id"
+        }
+    }
+
+    private struct TranscriptEnvelope: Decodable {
+        let payload: TranscriptWireEvent
+    }
 
     private var task: URLSessionWebSocketTask?
     private var session: URLSession?
@@ -307,7 +326,8 @@ actor EventStream {
             continuation?.yield(.connected(heartbeatMS: nil))
         } else {
             // 第一帧必须是 server_hello。
-            let hello = try await receiveFrame(on: task)
+            let helloData = try await receiveFrameData(on: task)
+            let hello = decodeJSONObject(from: helloData)
             guard hello["type"]?.stringValue == "server_hello" else {
                 throw KapError.http(status: 0, body: "期待 server_hello，收到 \(hello["type"]?.stringValue ?? "?")")
             }
@@ -337,9 +357,9 @@ actor EventStream {
         }
 
         while !isStopped, !Task.isCancelled {
-            let frame = try await receiveFrame(on: task)
+            let data = try await receiveFrameData(on: task)
             lastActivity = .now
-            handle(frame)
+            handle(data)
         }
     }
 
@@ -366,37 +386,125 @@ actor EventStream {
 
     // MARK: 收发
 
-    private func receiveFrame(on task: URLSessionWebSocketTask) async throws -> [String: JSONValue] {
+    private func receiveFrameData(on task: URLSessionWebSocketTask) async throws -> Data {
         let message = try await task.receive()
-        let data: Data = switch message {
-        case let .data(payload): payload
-        case let .string(text): Data(text.utf8)
-        @unknown default: Data()
+        switch message {
+        case let .data(payload): return payload
+        case let .string(text): return Data(text.utf8)
+        @unknown default: return Data()
         }
+    }
+
+    private func decodeJSONObject(from data: Data) -> [String: JSONValue] {
         guard !data.isEmpty else { return [:] }
         do {
-            return try JSONDecoder().decode([String: JSONValue].self, from: data)
+            return try decoder.decode([String: JSONValue].self, from: data)
         } catch {
             logger.error("ws 帧解析失败：\(String(data: data.prefix(200), encoding: .utf8) ?? "")")
             return [:]
         }
     }
 
-    private func handle(_ frame: [String: JSONValue]) {
-        guard let type = frame["type"]?.stringValue else { return }
+    private func handle(_ data: Data) {
+        guard !data.isEmpty else { return }
+        let header: FrameHeader
+        do {
+            header = try decoder.decode(FrameHeader.self, from: data)
+        } catch {
+            logger.error("ws 帧头解析失败：\(String(data: data.prefix(200), encoding: .utf8) ?? "")")
+            return
+        }
 
-        switch type {
+        switch header.type {
         case "pong":
             return
 
         case "ping":
             if wireProtocol == .conversation {
                 Task { [weak self] in
-                    await self?.send(["type": .string("pong")])
+                    await self?.sendRaw(#"{"type":"pong"}"#)
                 }
             }
             return
 
+        case "turns", "turns.removed", "turns.failed", "turn.started", "turn.updated", "turn.ended",
+             "item.started", "item.updated", "item.ended", "item.delta", "item.removed", "notice":
+            guard wireProtocol == .conversation,
+                  header.agentID == "main",
+                  let sessionID = header.sessionID else { return }
+            do {
+                let event = try decoder.decode(ConversationWireEvent.self, from: data)
+                continuation?.yield(.conversation(sessionID: sessionID, event))
+            } catch {
+                logger.error("conversation 帧解析失败：\(error.localizedDescription)")
+                continuation?.yield(.resyncRequired([sessionID]))
+            }
+            return
+
+        case "agent":
+            guard header.agentID == "main", let sessionID = header.sessionID else { return }
+            do {
+                let state = try decoder.decode(SessionAgentState.self, from: data)
+                continuation?.yield(.agentState(sessionID: sessionID, state))
+            } catch {
+                logger.error("agent 状态帧解析失败：\(error.localizedDescription)")
+            }
+            return
+
+        case "context", "usage":
+            guard header.agentID == "main", let sessionID = header.sessionID else { return }
+            do {
+                let usage = try decoder.decode(SessionContextUsage.self, from: data)
+                continuation?.yield(.agentUsage(sessionID: sessionID, usage))
+            } catch {
+                logger.error("\(header.type) 状态帧解析失败：\(error.localizedDescription)")
+            }
+            return
+
+        case "interaction":
+            do {
+                let interaction = try decoder.decode(InteractionFrame.self, from: data)
+                continuation?.yield(.interaction(interaction))
+            } catch {
+                logger.error("interaction 帧解析失败：\(error.localizedDescription)")
+            }
+            return
+
+        case "transcript.reset", "transcript.ops":
+            // 正文增量走专门的解码：直接从原始帧解出 payload，省去二次序列化。
+            guard let sessionID = header.sessionID else { return }
+            do {
+                let envelope = try decoder.decode(TranscriptEnvelope.self, from: data)
+                continuation?.yield(.transcript(sessionID: sessionID, envelope.payload))
+            } catch {
+                logger.error("transcript 帧解析失败：\(error.localizedDescription)")
+                // 解不开就当接不上：让上层全量重拉。
+                continuation?.yield(.resyncRequired([sessionID]))
+            }
+            return
+
+        case "response", "ack", "resync_required", "error":
+            handleControlFrame(type: header.type, frame: decodeJSONObject(from: data))
+            return
+
+        default:
+            break
+        }
+
+        // 其余都当会话事件。`volatile` 的帧（打字机增量那种）不推进游标。
+        guard let event = try? decoder.decode(SessionEventFrame.self, from: data) else { return }
+
+        if let sessionID = event.sessionID, let seq = event.seq, event.volatile != true {
+            let existing = cursors[sessionID]?.seq ?? -1
+            if seq > existing {
+                cursors[sessionID] = Cursor(seq: seq, epoch: event.epoch ?? cursors[sessionID]?.epoch)
+            }
+        }
+        continuation?.yield(.event(event))
+    }
+
+    private func handleControlFrame(type: String, frame: [String: JSONValue]) {
+        switch type {
         case "response":
             guard wireProtocol == .conversation,
                   let id = frame["request_id"]?.stringValue,
@@ -410,7 +518,6 @@ actor EventStream {
                 let message = frame["msg"]?.stringValue ?? "订阅失败（code \(code)）"
                 continuation?.yield(.subscriptionFailed(sessionID: pending.sessionID, message: message))
             }
-            return
 
         case "ack":
             let payload = frame["payload"]
@@ -449,105 +556,22 @@ actor EventStream {
                     continuation?.yield(.subscriptionFailed(sessionID: sessionID, message: message))
                 }
             }
-            return
 
         case "resync_required":
             let sessions = frame["payload"]?["session_ids"]?.arrayValue?.compactMap(\.stringValue)
                 ?? frame["session_id"]?.stringValue.map { [$0] }
                 ?? []
             continuation?.yield(.resyncRequired(sessions))
-            return
-
-        case "turns", "turns.removed", "turns.failed", "turn.started", "turn.updated", "turn.ended",
-             "item.started", "item.updated", "item.ended", "item.delta", "item.removed", "notice":
-            guard wireProtocol == .conversation,
-                  frame["agent_id"]?.stringValue == "main",
-                  let sessionID = frame["session_id"]?.stringValue,
-                  let data = try? JSONEncoder().encode(frame) else { return }
-            do {
-                let event = try JSONDecoder().decode(ConversationWireEvent.self, from: data)
-                continuation?.yield(.conversation(sessionID: sessionID, event))
-            } catch {
-                logger.error("conversation 帧解析失败：\(error.localizedDescription)")
-                continuation?.yield(.resyncRequired([sessionID]))
-            }
-            return
-
-        case "agent":
-            guard frame["agent_id"]?.stringValue == "main",
-                  let sessionID = frame["session_id"]?.stringValue,
-                  let data = try? JSONEncoder().encode(frame) else { return }
-            do {
-                let state = try JSONDecoder().decode(SessionAgentState.self, from: data)
-                continuation?.yield(.agentState(sessionID: sessionID, state))
-            } catch {
-                logger.error("agent 状态帧解析失败：\(error.localizedDescription)")
-            }
-            return
-
-        case "context", "usage":
-            guard frame["agent_id"]?.stringValue == "main",
-                  let sessionID = frame["session_id"]?.stringValue,
-                  let data = try? JSONEncoder().encode(frame) else { return }
-            do {
-                let usage = try JSONDecoder().decode(SessionContextUsage.self, from: data)
-                continuation?.yield(.agentUsage(sessionID: sessionID, usage))
-            } catch {
-                logger.error("\(type) 状态帧解析失败：\(error.localizedDescription)")
-            }
-            return
-
-        case "interaction":
-            guard let data = try? JSONEncoder().encode(frame) else { return }
-            do {
-                let interaction = try JSONDecoder().decode(InteractionFrame.self, from: data)
-                continuation?.yield(.interaction(interaction))
-            } catch {
-                logger.error("interaction 帧解析失败：\(error.localizedDescription)")
-            }
-            return
-
-        case "transcript.reset", "transcript.ops":
-            // 正文增量走专门的解码：payload 里是 camelCase 的 ops，不进通用事件。
-            guard
-                let sessionID = frame["session_id"]?.stringValue,
-                let payload = frame["payload"],
-                let data = try? JSONEncoder().encode(payload)
-            else { return }
-            do {
-                let event = try JSONDecoder().decode(TranscriptWireEvent.self, from: data)
-                continuation?.yield(.transcript(sessionID: sessionID, event))
-            } catch {
-                logger.error("transcript 帧解析失败：\(error.localizedDescription)")
-                // 解不开就当接不上：让上层全量重拉。
-                continuation?.yield(.resyncRequired([sessionID]))
-            }
-            return
 
         case "error":
             let message = frame["payload"]?["message"]?.stringValue
                 ?? frame["msg"]?.stringValue
                 ?? "未知错误"
             logger.error("ws error：\(message)")
-            return
 
         default:
             break
         }
-
-        // 其余都当会话事件。`volatile` 的帧（打字机增量那种）不推进游标。
-        guard
-            let data = try? JSONEncoder().encode(frame),
-            let event = try? JSONDecoder().decode(SessionEventFrame.self, from: data)
-        else { return }
-
-        if let sessionID = event.sessionID, let seq = event.seq, event.volatile != true {
-            let existing = cursors[sessionID]?.seq ?? -1
-            if seq > existing {
-                cursors[sessionID] = Cursor(seq: seq, epoch: event.epoch ?? cursors[sessionID]?.epoch)
-            }
-        }
-        continuation?.yield(.event(event))
     }
 
     private func scheduleSubscriptionRetry(kind: SubscriptionKind, sessionID: String) {
@@ -617,11 +641,15 @@ actor EventStream {
     }
 
     private func send(_ payload: [String: JSONValue]) async {
-        guard let task else { return }
         guard
-            let data = try? JSONEncoder().encode(payload),
+            let data = try? encoder.encode(payload),
             let text = String(data: data, encoding: .utf8)
         else { return }
+        await sendRaw(text)
+    }
+
+    private func sendRaw(_ text: String) async {
+        guard let task else { return }
         do {
             try await task.send(.string(text))
         } catch {

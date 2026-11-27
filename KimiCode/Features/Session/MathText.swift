@@ -94,9 +94,16 @@ enum MathSyntax {
 
     /// 公式换成占位符后的文本，和按顺序排好的公式。
     static func mask(_ text: String) -> (text: String, formulas: [Formula]) {
+        let cleaned = text.contains(placeholder)
+            ? text.replacingOccurrences(of: String(placeholder), with: "")
+            : text
+        guard cleaned.contains("$") || cleaned.contains("\\(") || cleaned.contains("\\[") else {
+            return (cleaned, [])
+        }
         var masked = ""
+        masked.reserveCapacity(cleaned.utf8.count)
         var formulas: [Formula] = []
-        for segment in segments(text.replacingOccurrences(of: String(placeholder), with: "")) {
+        for segment in segments(cleaned) {
             switch segment {
             case let .text(part): masked += part
             case let .math(formula):
@@ -178,16 +185,52 @@ enum MathRenderer {
                              labelMode: display ? .display : .text, textAlignment: .left)
         let (error, image, layout) = math.asImage()
         guard error == nil, let image, let layout, image.size.width > 0 else {
-            failures.withLock { _ = $0.insert(key) }
+            failures.withLock { set in
+                if set.count > 500 { set.removeAll(keepingCapacity: true) }
+                set.insert(key)
+            }
             return nil
         }
         let rendered = Rendered(image: image, ascent: layout.ascent, descent: layout.descent)
         cache.withLock { cache in
-            if cache.count > 500 { cache.removeAll() }
+            if cache.count > 500 { cache.removeAll(keepingCapacity: true) }
             cache[key] = rendered
         }
         return rendered
     }
+
+    private static let literalReplacements: [(String, String)] = [
+        ("\\lVert", "\\|"), ("\\rVert", "\\|"), ("\\lvert", "|"), ("\\rvert", "|"),
+        ("\\nonumber", ""), ("\\notag", ""), ("\\xrightarrow", "\\rightarrow^"),
+        ("\\xleftarrow", "\\leftarrow^"), ("\\hline", ""),
+        ("{smallmatrix}", "{matrix}"),
+    ]
+
+    private static let commandReplacements: [String: String] = [
+        "dfrac": "\\frac", "tfrac": "\\frac", "cfrac": "\\frac",
+        "dbinom": "\\binom", "tbinom": "\\binom", "operatorname": "\\mathrm",
+        "iiint": "\\int\\int\\int", "iint": "\\int\\int", "oint": "\\int",
+        "varnothing": "\\emptyset", "dots": "\\ldots",
+        "implies": "\\Rightarrow", "impliedby": "\\Leftarrow", "bmod": "\\;\\mathrm{mod}\\;",
+        "R": "\\mathbb{R}", "N": "\\mathbb{N}", "Z": "\\mathbb{Z}",
+        "Q": "\\mathbb{Q}", "C": "\\mathbb{C}",
+        "big": "", "Big": "", "bigg": "", "Bigg": "",
+        "bigl": "", "bigr": "", "Bigl": "", "Bigr": "",
+        "biggl": "", "biggr": "", "Biggl": "", "Biggr": "",
+    ]
+
+    // 预编译正则，避免在高频渲染时反复构造 30+ 个 Regex 实例（只读字节码，无共享可变状态）。
+    private nonisolated(unsafe) static let commandRegex = /\\([A-Za-z]+)(?![A-Za-z0-9_])/
+    private nonisolated(unsafe) static let pmodRegex = /\\pmod\{([^{}]*)\}/
+    private nonisolated(unsafe) static let oversetRegex = /\\(?:overset|stackrel)\{([^{}]*)\}\{([^{}]*)\}/
+    private nonisolated(unsafe) static let undersetRegex = /\\underset\{([^{}]*)\}\{([^{}]*)\}/
+    private nonisolated(unsafe) static let cancelRegex = /\\(?:cancel|mathring)(?=\{)/
+    private nonisolated(unsafe) static let tagRegex = /\\(?:tag|label)\*?\{[^{}]*\}/
+    private nonisolated(unsafe) static let textcolorRegex = /\\textcolor\{[^{}]*\}/
+    private nonisolated(unsafe) static let colorRegex = /\\color\{[^{}]*\}/
+    private nonisolated(unsafe) static let boxedRegex = /\\(?:boxed|fbox)(?=\{)/
+    private nonisolated(unsafe) static let equationRegex = /\\(begin|end)\{equation\*?\}/
+    private nonisolated(unsafe) static let alignRegex = /\\(begin|end)\{(?:align|gather|gathered|multline)\*?\}/
 
     /// 模型常写、SwiftMath 1.7.3 不认的写法换成它认的（逐条实测过）：
     /// `\dfrac` → `\frac`，`\lVert` → `\|`，`\boxed{x}` → `x`，`\tag` / `\label` / 颜色去掉，`equation` 去壳，
@@ -195,35 +238,23 @@ enum MathRenderer {
     static func normalized(_ latex: String) -> String {
         guard latex.contains("\\") else { return latex }
         var text = latex
-        for (old, new) in [("\\lVert", "\\|"), ("\\rVert", "\\|"), ("\\lvert", "|"), ("\\rvert", "|"),
-                           ("\\nonumber", ""), ("\\notag", ""), ("\\xrightarrow", "\\rightarrow^"),
-                           ("\\xleftarrow", "\\leftarrow^"), ("\\hline", ""),
-                           ("{smallmatrix}", "{matrix}")] {
+        for (old, new) in literalReplacements where text.contains(old) {
             text = text.replacingOccurrences(of: old, with: new)
         }
-        // 整个命令名替换（后面不能再接字母，免得 `\R` 碰到 `\Rightarrow`）。
-        for (old, new) in [("dfrac", "\\frac"), ("tfrac", "\\frac"), ("cfrac", "\\frac"),
-                           ("dbinom", "\\binom"), ("tbinom", "\\binom"), ("operatorname", "\\mathrm"),
-                           ("iiint", "\\int\\int\\int"), ("iint", "\\int\\int"), ("oint", "\\int"),
-                           ("varnothing", "\\emptyset"), ("dots", "\\ldots"),
-                           ("implies", "\\Rightarrow"), ("impliedby", "\\Leftarrow"), ("bmod", "\\;\\mathrm{mod}\\;"),
-                           ("R", "\\mathbb{R}"), ("N", "\\mathbb{N}"), ("Z", "\\mathbb{Z}"),
-                           ("Q", "\\mathbb{Q}"), ("C", "\\mathbb{C}"),
-                           ("big", ""), ("Big", ""), ("bigg", ""), ("Bigg", ""),
-                           ("bigl", ""), ("bigr", ""), ("Bigl", ""), ("Bigr", ""),
-                           ("biggl", ""), ("biggr", ""), ("Biggl", ""), ("Biggr", "")] {
-            text = text.replacing(Regex { "\\" + old; NegativeLookahead { .word } }, with: new)
+        // 单遍扫描替换整个命令名（后面不接字母/数字/下划线，免得 `\R` 碰到 `\Rightarrow`）。
+        text = text.replacing(commandRegex) { match in
+            commandReplacements[String(match.1)] ?? String(match.0)
         }
-        text = text.replacing(/\\pmod\{([^{}]*)\}/) { "\\;(\\mathrm{mod}\\;\($0.1))" }
-        text = text.replacing(/\\(?:overset|stackrel)\{([^{}]*)\}\{([^{}]*)\}/) { "{\($0.2)}^{\($0.1)}" }
-        text = text.replacing(/\\underset\{([^{}]*)\}\{([^{}]*)\}/) { "{\($0.2)}_{\($0.1)}" }
-        text = text.replacing(/\\(?:cancel|mathring)(?=\{)/, with: "")
-        text = text.replacing(/\\(?:tag|label)\*?\{[^{}]*\}/, with: "")
-        text = text.replacing(/\\textcolor\{[^{}]*\}/, with: "")
-        text = text.replacing(/\\color\{[^{}]*\}/, with: "")
-        text = text.replacing(/\\(?:boxed|fbox)(?=\{)/, with: "")
-        text = text.replacing(/\\(begin|end)\{equation\*?\}/, with: "")
-        text = text.replacing(/\\(begin|end)\{(?:align|gather|gathered|multline)\*?\}/) { "\\\($0.1){aligned}" }
+        text = text.replacing(pmodRegex) { "\\;(\\mathrm{mod}\\;\($0.1))" }
+        text = text.replacing(oversetRegex) { "{\($0.2)}^{\($0.1)}" }
+        text = text.replacing(undersetRegex) { "{\($0.2)}_{\($0.1)}" }
+        text = text.replacing(cancelRegex, with: "")
+        text = text.replacing(tagRegex, with: "")
+        text = text.replacing(textcolorRegex, with: "")
+        text = text.replacing(colorRegex, with: "")
+        text = text.replacing(boxedRegex, with: "")
+        text = text.replacing(equationRegex, with: "")
+        text = text.replacing(alignRegex) { "\\\($0.1){aligned}" }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
@@ -266,16 +297,23 @@ extension NSAttributedString {
 }
 
 /// 独占几行的块级公式：放得下居中，太宽就横向滚动。长按拷贝源码。
-struct MathBlockView: View {
+struct MathBlockView: View, Equatable {
     let latex: String
+    /// 流式输出尚未闭合时先直接展示源码，避免每吐一个字就让 SwiftMath 反复尝试解析残缺公式。
+    var isPending = false
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    nonisolated static func == (lhs: MathBlockView, rhs: MathBlockView) -> Bool {
+        lhs.latex == rhs.latex && lhs.isPending == rhs.isPending
+    }
+
     var body: some View {
         let traits = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
         let fontSize = UIFont.preferredFont(forTextStyle: .body).pointSize
-        if let rendered = MathRenderer.render(latex, fontSize: fontSize,
+        if !isPending,
+           let rendered = MathRenderer.render(latex, fontSize: fontSize,
                                               color: UIColor.label.resolvedColor(with: traits), display: true) {
             let image = Image(uiImage: rendered.image)
             ViewThatFits(in: .horizontal) {

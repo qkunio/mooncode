@@ -34,13 +34,25 @@ final class ChatModel {
     private(set) var session: SessionSummary?
     let workspace: Workspace?
 
-    private(set) var transcript = TranscriptState()
-    /// 2.6+ 保留原始 turns 状态，再投影成现有 transcript 视图模型。
-    private var conversation: ConversationState?
+    /// 权威正文状态机（仅内部同步维护，不直接触发全页观察；UI 读 `entries`、`liveStream` 与细粒度派生状态）。
+    @ObservationIgnored private(set) var transcript = TranscriptState()
+    /// 2.6+ 保留原始 turns 状态，增量同步到 `transcript`。
+    @ObservationIgnored private var conversation: ConversationState?
+    /// 按轮次缓存视图模型，结构重建时只重算变化的轮次。
+    @ObservationIgnored private var projectionCache = ConversationProjectionCache()
     /// 由 transcript 派生的对话流（用户气泡 / 助手消息 / 压缩分隔）。
     private(set) var entries: [ChatEntry] = []
-    /// 正文每变一次加一，给「停在底部就跟随」用。
-    private(set) var contentVersion = 0
+    /// 当前活跃流式块的独立状态槽：高频 delta 只更新这里，不触发整条对话列表 diff。
+    let liveStream = LiveStreamStore()
+    @ObservationIgnored private let pacer: StreamPacer
+
+    // 细粒度派生状态：仅值真正变化时写回，避免流式输出期间无效触发 composer / 列表头部重绘。
+    private(set) var hasMoreOlder = false
+    private(set) var isWorking = false
+    private(set) var isCompacting = false
+    private(set) var retry: RetryState?
+    private(set) var lastTurnEnd: TurnEnd?
+
     var pendingApprovals: [ApprovalRequest] { interactions.approvals }
     var pendingQuestions: [QuestionRequest] { interactions.questions }
     private(set) var isLoading = false
@@ -49,14 +61,19 @@ final class ChatModel {
     private(set) var isLoadingOlder = false
     private(set) var isSending = false
     /// `POST /prompts` 已经返回、但正文里这一轮还没开始跑：接住这段空档，「请求中…」不中途消失。
-    private var awaitingTurn = false
-    private var awaitingTurnTimeout: Task<Void, Never>?
+    @ObservationIgnored private var awaitingTurn = false
+    @ObservationIgnored private var awaitingTurnTimeout: Task<Void, Never>?
     private(set) var connectionState: ConnectionState = .idle
     var errorMessage: String?
     /// 最近一次错误是否疑似上游 Kimi Code 协议不兼容（弹窗附带「使用网页版」按钮）。
     var isCompatibilityError = false
     /// 撤销后放回输入框的原文（官方：「已撤销，原文已放回输入框」）。
     var restoredDraft: String?
+
+    struct RetryState: Equatable, Sendable {
+        let next: Int
+        let max: Int
+    }
 
     // composer
     private(set) var config: ComposerConfig
@@ -96,17 +113,17 @@ final class ChatModel {
 
     /// 草稿刚建成会话、第一条消息还没发出：服务端此时还是默认配置（建会话时不采纳 agent_config），
     /// 别让它覆盖 composer 上选好的值 —— 第一条消息会把模型 / 思考强度 / 权限一起带上。
-    private var holdsLocalConfig = false
+    @ObservationIgnored private var holdsLocalConfig = false
     /// 只有收到严格解码的 agent 全量帧，才确认新版状态协议；usage/context 不能单独证明配置通道可用。
-    private var usesStateStream = false
-    private var legacyStatusUnavailable = false
-    private var detectedWireProtocol: TranscriptProtocol?
-    private var agentState: SessionAgentState?
+    @ObservationIgnored private var usesStateStream = false
+    @ObservationIgnored private var legacyStatusUnavailable = false
+    @ObservationIgnored private var detectedWireProtocol: TranscriptProtocol?
+    @ObservationIgnored private var agentState: SessionAgentState?
     private var interactions = PendingInteractions()
-    private var interactionProtocol: InteractionProtocol = .unknown
-    private var subscriptionError: String?
+    @ObservationIgnored private var interactionProtocol: InteractionProtocol = .unknown
+    @ObservationIgnored private var subscriptionError: String?
     /// 现场量到的思考时长（官方 `thinkingTiming`），只在本次打开期间有效。
-    private var thinkingTiming: [String: ThinkingTiming] = [:]
+    @ObservationIgnored private var thinkingTiming: [String: ThinkingTiming] = [:]
 
     private enum InteractionProtocol {
         case unknown
@@ -114,28 +131,30 @@ final class ChatModel {
         case frames
     }
 
-    private var stream: EventStream?
-    private var streamTask: Task<Void, Never>?
-    private var foregroundTask: Task<Void, Never>?
-    private var backgroundTask: Task<Void, Never>?
+    @ObservationIgnored private var stream: EventStream?
+    @ObservationIgnored private var streamTask: Task<Void, Never>?
+    @ObservationIgnored private var foregroundTask: Task<Void, Never>?
+    @ObservationIgnored private var backgroundTask: Task<Void, Never>?
     /// 进后台时向系统要的那段执行时间（约 30 秒）：短暂切出去时连接不断，正文照常往下收。
     #if canImport(UIKit)
-    private var backgroundTimeID: UIBackgroundTaskIdentifier = .invalid
+    @ObservationIgnored private var backgroundTimeID: UIBackgroundTaskIdentifier = .invalid
     #endif
-    private var backgroundedAt: ContinuousClock.Instant?
+    @ObservationIgnored private var backgroundedAt: ContinuousClock.Instant?
     /// 后台时间用完了（系统马上要挂起 App），连接多半会被掐掉。
-    private var backgroundTimeExpired = false
+    @ObservationIgnored private var backgroundTimeExpired = false
     /// 在后台待了超过这么久（约等于系统给的后台时间），回来就不信任旧连接和旧正文：直接重连、骨架屏重拉。
     private static let backgroundGrace: Duration = .seconds(30)
     /// 正在全量重拉的次数。期间收到的正文增量先存着，拉完再按顺序补上（网页端 `buffered`），
     /// 否则会先应用到旧数据上、再被重拉结果整个盖掉。
-    private var activeReloads = 0
-    private var bufferedTranscript: [TranscriptWireEvent] = []
-    private var bufferedConversation: [ConversationWireEvent] = []
+    @ObservationIgnored private var activeReloads = 0
+    @ObservationIgnored private var bufferedTranscript: [TranscriptWireEvent] = []
+    @ObservationIgnored private var bufferedConversation: [ConversationWireEvent] = []
     /// 连续收到「空快照」的次数，用来退避重拉（网页端 `emptyResetRetries`）。
-    private var emptyResetRetries = 0
-    private let interactionRefresh = RefreshScheduler()
-    private let transcriptReload = RefreshScheduler()
+    @ObservationIgnored private var emptyResetRetries = 0
+    @ObservationIgnored private let interactionRefresh = RefreshScheduler()
+    @ObservationIgnored private let transcriptReload = RefreshScheduler()
+    @ObservationIgnored private let seqReporter = RefreshScheduler()
+    @ObservationIgnored private var pendingReportedSeq: Int?
     @ObservationIgnored private let attachmentCache: NSCache<NSString, NSData> = {
         let cache = NSCache<NSString, NSData>()
         cache.totalCostLimit = 32 * 1024 * 1024
@@ -180,36 +199,68 @@ final class ChatModel {
         self.liveUpdates = liveUpdates
         self.onSessionCreated = onSessionCreated
         self.onConfigChanged = onConfigChanged
+        self.pacer = StreamPacer(liveStream: liveStream)
+        self.pacer.onStructuralFlush = { [weak self] in
+            self?.rebuild()
+        }
     }
 
     // MARK: 运行态
 
-    /// 新版 agent.status / agent.compacting 是权威值；首帧到达前及旧版使用 transcript 的活动状态。
-    var isWorking: Bool {
-        let serverActive = agentState?.isWorking ?? transcript.isTurnActive
-        return serverActive || isSending || awaitingTurn
-    }
-
     /// composer 用：忙时只给「停止」。
     var isBusy: Bool { isWorking }
 
-    /// 新旧 transcript 都有 step.retry；旧版再回退到 meta.agent.phase。
-    var retry: (next: Int, max: Int)? {
-        if let retry = transcript.turns.last?.steps.reversed().compactMap(\.retry).first {
-            return (retry.nextAttempt, retry.maxAttempts)
-        }
-        guard let phase = transcript.phase, phase["kind"]?.stringValue == "retrying" else { return nil }
-        return (phase["nextAttempt"]?.intValue ?? 0, phase["maxAttempts"]?.intValue ?? 0)
-    }
-
     /// 上一轮怎么结束的：`cancelled` 画「已手动终止」，`failed` 画失败卡片 + 继续。
-    enum TurnEnd: Equatable {
+    enum TurnEnd: Equatable, Sendable {
         case cancelled
         case failed(maxSteps: Bool, message: String?, meta: String?)
     }
 
-    var lastTurnEnd: TurnEnd? {
-        guard !isWorking, let last = transcript.turns.last else { return nil }
+    /// 统一收敛派生运行态，只在值实际改变时通知 SwiftUI，避免流式输出期间无关视图重绘。
+    private func syncDerivedState() {
+        let nextHasMore = transcript.hasMoreOlder
+        if hasMoreOlder != nextHasMore { hasMoreOlder = nextHasMore }
+
+        let serverActive = agentState?.isWorking ?? transcript.isTurnActive
+        let nextWorking = serverActive || isSending || awaitingTurn
+        if isWorking != nextWorking { isWorking = nextWorking }
+
+        let nextCompacting: Bool = if let agentState {
+            agentState.isCompacting
+        } else {
+            transcriptCompactingFlag()
+        }
+        if isCompacting != nextCompacting { isCompacting = nextCompacting }
+
+        let nextRetry = computeRetry()
+        if retry != nextRetry { retry = nextRetry }
+
+        let nextTurnEnd = computeLastTurnEnd(working: nextWorking)
+        if lastTurnEnd != nextTurnEnd { lastTurnEnd = nextTurnEnd }
+    }
+
+    private func transcriptCompactingFlag() -> Bool {
+        for item in transcript.items.reversed() {
+            guard case let .marker(marker) = item, marker.marker == "compaction" else { continue }
+            return marker.payload?["phase"]?.stringValue == "started"
+        }
+        return false
+    }
+
+    /// 新旧 transcript 都有 step.retry；旧版再回退到 meta.agent.phase。
+    private func computeRetry() -> RetryState? {
+        if let retry = transcript.lastTurn?.steps.reversed().compactMap(\.retry).first {
+            return RetryState(next: retry.nextAttempt, max: retry.maxAttempts)
+        }
+        guard let phase = transcript.phase, phase["kind"]?.stringValue == "retrying" else { return nil }
+        return RetryState(
+            next: phase["nextAttempt"]?.intValue ?? 0,
+            max: phase["maxAttempts"]?.intValue ?? 0
+        )
+    }
+
+    private func computeLastTurnEnd(working: Bool) -> TurnEnd? {
+        guard !working, let last = transcript.lastTurn else { return nil }
         let phase = transcript.phase
         let phaseKind = phase?["kind"]?.stringValue
         let reason = phase?["reason"]?.stringValue
@@ -231,16 +282,6 @@ final class ChatModel {
         default:
             return nil
         }
-    }
-
-    /// 最近一次压缩开始了、还没完成：「正在压缩上下文…」
-    var isCompacting: Bool {
-        if let agentState { return agentState.isCompacting }
-        for item in transcript.items.reversed() {
-            guard case let .marker(marker) = item, marker.marker == "compaction" else { continue }
-            return marker.payload?["phase"]?.stringValue == "started"
-        }
-        return false
     }
 
     // MARK: 生命周期
@@ -300,6 +341,7 @@ final class ChatModel {
     }
 
     private func beginBackgroundTime() {
+        pacer.flushPendingText()
         endBackgroundTime()
         backgroundedAt = .now
         backgroundTimeExpired = false
@@ -340,15 +382,19 @@ final class ChatModel {
     }
 
     func stop() {
+        pacer.stop()
         streamTask?.cancel()
         streamTask = nil
         foregroundTask?.cancel()
         foregroundTask = nil
         backgroundTask?.cancel()
         backgroundTask = nil
+        awaitingTurnTimeout?.cancel()
+        awaitingTurnTimeout = nil
         endBackgroundTime()
         interactionRefresh.cancel()
         transcriptReload.cancel()
+        seqReporter.cancel()
         let stream = stream
         self.stream = nil
         Task { await stream?.stop() }
@@ -405,6 +451,7 @@ final class ChatModel {
                 conversation = nil
                 transcript = TranscriptState(page: loaded)
             }
+            pacer.reset(clearLiveStream: true)
             rebuild()
             // 正文一到就撤骨架：后面的 status / 确认拉取还在路上，不该挡着已到的内容。
             isLoading = false
@@ -431,7 +478,7 @@ final class ChatModel {
     /// 「加载更早的消息」。
     func loadOlder() async {
         guard let sessionID, transcript.hasMoreOlder, !isLoadingOlder,
-              let first = transcript.turns.first else { return }
+              let first = transcript.firstTurn else { return }
         isLoadingOlder = true
         defer { isLoadingOlder = false }
         do {
@@ -444,6 +491,7 @@ final class ChatModel {
             } else {
                 transcript.prepend(older: page)
             }
+            pacer.reset(clearLiveStream: true)
             rebuild()
         } catch {
             guard !Task.isCancelled, !KapError.isCancellation(error) else { return }
@@ -515,28 +563,37 @@ final class ChatModel {
     }
 
     private func apply(_ state: SessionAgentState) {
+        let wasWorking = isWorking
         usesStateStream = true
         agentState = state
+        syncDerivedState()
+        // 轮次刚从运行切到空闲：立即把实时槽位落回 entries，页脚与最终文本一步到位。
+        if wasWorking, !isWorking, pacer.currentAnchor != nil || pacer.hasPendingWork {
+            pacer.reset(clearLiveStream: true)
+            rebuild(allowLiveStream: false)
+        }
         guard !holdsLocalConfig else { return }
-        config = ComposerConfig(
+        let nextConfig = ComposerConfig(
             permission: state.permission ?? config.permission,
             modelID: state.model,
             effort: state.thinkingLevel
         )
+        if config != nextConfig { config = nextConfig }
     }
 
     private func apply(_ usage: SessionContextUsage) {
-        contextTokens = usage.contextTokens
-        maxContextTokens = usage.maxContextTokens
-        contextUsage = usage.ratio
+        if contextTokens != usage.contextTokens { contextTokens = usage.contextTokens }
+        if maxContextTokens != usage.maxContextTokens { maxContextTokens = usage.maxContextTokens }
+        let ratio = usage.ratio
+        if contextUsage != ratio { contextUsage = ratio }
     }
 
     /// 旧版 `meta.agent` 里带着配置和用量；新版全量 agent / usage 帧优先，不能被旧投影覆盖。
     private func applyAgentMeta() {
         guard !usesStateStream, let agent = transcript.meta["agent"] else { return }
-        if let tokens = agent["contextTokens"]?.intValue { contextTokens = tokens }
-        if let max = agent["maxContextTokens"]?.intValue { maxContextTokens = max }
-        if case let .number(usage)? = agent["contextUsage"] { contextUsage = usage }
+        if let tokens = agent["contextTokens"]?.intValue, contextTokens != tokens { contextTokens = tokens }
+        if let max = agent["maxContextTokens"]?.intValue, maxContextTokens != max { maxContextTokens = max }
+        if case let .number(usage)? = agent["contextUsage"], contextUsage != usage { contextUsage = usage }
         guard !holdsLocalConfig else { return }
         var next = config
         if let raw = agent["permission"]?.stringValue, let permission = PermissionMode(rawValue: raw) {
@@ -547,23 +604,43 @@ final class ChatModel {
         if next != config { config = next }
     }
 
-    private func rebuild() {
+    private func rebuild(initialBurst: String? = nil, allowLiveStream: Bool = true) {
         ConversationBuilder.updateTiming(&thinkingTiming, state: transcript)
-        entries = ConversationBuilder.build(transcript, timing: thinkingTiming)
-        contentVersion &+= 1
-        applyAgentMeta()
-        // 按服务端收据确认，不能用正文相同来判断；纯图片和重复文字也必须能对应上。
-        let turnIDs = Set(transcript.turns.compactMap(\.triggerPromptId))
-        let promptIDs = Set(transcript.prompts.values.flatMap { prompt in
-            [prompt.promptId, prompt.userMessageId].compactMap { $0 }
-        })
-        let known = turnIDs.union(promptIDs)
-        optimisticPrompts.removeAll { prompt in
-            !prompt.failed && [prompt.promptID, prompt.userMessageID].compactMap { $0 }.contains(where: known.contains)
+        let nextEntries = projectionCache.build(from: transcript, timing: thinkingTiming)
+        if entries != nextEntries {
+            entries = nextEntries
         }
+        applyAgentMeta()
+        reconcileOptimisticPrompts()
         // 这一轮已经跑起来了，或者跑得太快、回复已经落进正文（体验模式轮询时会这样）：空档结束。
         if awaitingTurn, transcript.isTurnActive || (optimisticPrompts.isEmpty && entries.last?.isAssistant == true) {
             setAwaitingTurn(false)
+        }
+        syncDerivedState()
+
+        if allowLiveStream, liveUpdates, optimisticPrompts.isEmpty,
+           let anchor = ConversationBuilder.liveAnchor(state: transcript, entries: entries, isWorking: isWorking) {
+            pacer.attach(anchor, initialBurst: initialBurst)
+        } else {
+            pacer.reset(clearLiveStream: true)
+        }
+    }
+
+    private func reconcileOptimisticPrompts() {
+        guard !optimisticPrompts.isEmpty else { return }
+        // 按服务端收据确认，不能用正文相同来判断；纯图片和重复文字也必须能对应上。
+        var known = Set<String>()
+        for item in transcript.items {
+            if case let .turn(turn) = item, let id = turn.triggerPromptId {
+                known.insert(id)
+            }
+        }
+        for prompt in transcript.prompts.values {
+            known.insert(prompt.promptId)
+            if let userMessageId = prompt.userMessageId { known.insert(userMessageId) }
+        }
+        optimisticPrompts.removeAll { prompt in
+            !prompt.failed && [prompt.promptID, prompt.userMessageID].compactMap { $0 }.contains(where: known.contains)
         }
     }
 
@@ -572,11 +649,13 @@ final class ChatModel {
         awaitingTurn = value
         awaitingTurnTimeout?.cancel()
         awaitingTurnTimeout = nil
+        syncDerivedState()
         guard value else { return }
         awaitingTurnTimeout = Task { [weak self] in
             try? await Task.sleep(for: .seconds(15))
             guard !Task.isCancelled else { return }
             self?.awaitingTurn = false
+            self?.syncDerivedState()
         }
     }
 
@@ -660,7 +739,11 @@ final class ChatModel {
 
     private func submit(_ optimistic: OptimisticPrompt) async {
         isSending = true
-        defer { isSending = false }
+        syncDerivedState()
+        defer {
+            isSending = false
+            syncDerivedState()
+        }
 
         do {
             // 草稿：先在对应文件夹里建会话（带上 composer 里选好的配置），再发消息。
@@ -857,6 +940,9 @@ final class ChatModel {
                 interactions.reset()
             }
             interactions.apply(frame)
+            if pacer.hasPendingWork {
+                pacer.flushPendingText()
+            }
 
         case let .interactionsReset(eventSession):
             guard eventSession == sessionID else { return }
@@ -912,10 +998,11 @@ final class ChatModel {
                 return
             }
             emptyResetRetries = 0
+            pacer.reset(clearLiveStream: true)
             transcript = TranscriptState(snapshot: snapshot, hasMoreOlder: hasMoreOlder, seq: seq)
             rebuild()
             scheduleInteractionRefresh()
-            if let seq, let sessionID { Task { await stream?.noteTranscriptSeq(sessionID, seq: seq) } }
+            if let seq { reportTranscriptSeq(seq, immediate: true) }
 
         case let .ops(agentId, ops, seq):
             guard agentId == "main" else { return }
@@ -930,19 +1017,52 @@ final class ChatModel {
                 }
             }
             let wasActive = transcript.isTurnActive
+            let activeAnchor = pacer.currentAnchor
+            var pureAnchorDelta: String? = activeAnchor != nil ? "" : nil
+            var singleAppendBurst: String? = nil
+
             for op in ops {
                 if case .interactionUpsert = op { scheduleInteractionRefresh() }
-                guard transcript.apply(op) else {
-                    // offset 对不上 = 丢了增量：全量重拉。
-                    scheduleTranscriptReload()
-                    return
+                if let activeAnchor, pureAnchorDelta != nil,
+                   case let .append(.frame(turnId, stepId, frameId), _, _) = op,
+                   activeAnchor.matches(turnID: turnId, stepID: stepId, frameID: frameId),
+                   let oldUTF8 = transcript.frameTextUTF8Count(turnID: turnId, stepID: stepId, frameID: frameId) {
+                    guard transcript.apply(op) else {
+                        scheduleTranscriptReload()
+                        return
+                    }
+                    let added = transcript.frameTextSuffix(
+                        turnID: turnId, stepID: stepId, frameID: frameId, fromUTF8Offset: oldUTF8
+                    )
+                    if !added.isEmpty { pureAnchorDelta?.append(added) }
+                } else {
+                    pureAnchorDelta = nil
+                    if ops.count == 1, case let .append(.frame(_, _, _), _, text) = op {
+                        singleAppendBurst = text
+                    }
+                    guard transcript.apply(op) else {
+                        // offset 对不上 = 丢了增量：全量重拉。
+                        scheduleTranscriptReload()
+                        return
+                    }
                 }
             }
             if let seq {
                 transcript.seq = seq
-                if let sessionID { Task { await stream?.noteTranscriptSeq(sessionID, seq: seq) } }
+                reportTranscriptSeq(seq, immediate: pureAnchorDelta == nil)
             }
-            rebuild()
+            if let activeAnchor, let delta = pureAnchorDelta {
+                // 整批 ops 都只追加到当前已绑定的活跃流式块：直接喂给节拍器，跳过整页重建。
+                _ = pacer.acceptDelta(
+                    turnID: activeAnchor.turnID,
+                    stepID: activeAnchor.stepID,
+                    frameID: activeAnchor.frameID,
+                    delta: delta
+                )
+                return
+            }
+            pacer.reset(clearLiveStream: true)
+            rebuild(initialBurst: singleAppendBurst)
             if wasActive, !transcript.isTurnActive, let sessionID {
                 // 一轮结束：刷新 composer 状态（上下文圈）和确认列表。
                 Task { [weak self] in
@@ -969,9 +1089,44 @@ final class ChatModel {
         default:
             break
         }
-        conversation?.apply(event)
-        transcript = conversation?.transcriptState ?? transcript
-        rebuild()
+        let change = conversation!.apply(event)
+        let sync = conversation!.sync(to: &transcript, change: change)
+
+        switch sync {
+        case .unchanged:
+            return
+
+        case let .textDelta(turnID, stepID, frameID, _, delta):
+            // 99% 的流式 token 命中这里：不触发任何投影、不重建 entries、直接交给节拍器平滑推进。
+            if pacer.acceptDelta(turnID: turnID, stepID: stepID, frameID: frameID, delta: delta) {
+                return
+            }
+            // 新块首次出现非空白内容（或切换了活跃帧）：做一次增量重建并绑定新锚点。
+            pacer.reset(clearLiveStream: true)
+            rebuild(initialBurst: delta)
+
+        case .structural:
+            if case .itemDelta = change {
+                // 工具入参 / 输出的流式增量：合并到 ~30Hz 节拍刷新，避免高频工具日志拖垮主线程。
+                if pacer.currentAnchor != nil {
+                    pacer.reset(clearLiveStream: true)
+                }
+                pacer.scheduleStructuralRebuild()
+                return
+            }
+            pacer.reset(clearLiveStream: true)
+            rebuild()
+        }
+    }
+
+    /// 合并回报已应用的 legacy `seq`，避免每个 delta 都新建 Task 跳一次 actor。
+    private func reportTranscriptSeq(_ seq: Int, immediate: Bool) {
+        pendingReportedSeq = seq
+        let delay: Duration = immediate ? .zero : .milliseconds(250)
+        seqReporter.schedule(after: delay) { [weak self] in
+            guard let self, let sessionID = self.sessionID, let latest = self.pendingReportedSeq else { return }
+            await self.stream?.noteTranscriptSeq(sessionID, seq: latest)
+        }
     }
 
     private func scheduleTranscriptReload(after delay: Duration = .milliseconds(300)) {

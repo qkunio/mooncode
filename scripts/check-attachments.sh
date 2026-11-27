@@ -8,7 +8,7 @@ cd "$task_repo_root"
 
 swiftc -swift-version 6 -parse-as-library \
   KimiCode/Core/{JSONValue,Envelope,Models,Endpoint,Transcript,Conversation,KapClient,KapServicing,DemoClient,EventStream,RefreshScheduler,PreviewStorage,RuntimeFrames}.swift \
-  KimiCode/Features/Session/{ChatModel,ConversationBuilder}.swift \
+  KimiCode/Features/Session/{StreamPipeline,ChatModel,ConversationBuilder}.swift \
   scripts/AttachmentChecks.swift \
   -o "$task_check_dir/attachment-checks"
 "$task_check_dir/attachment-checks"
