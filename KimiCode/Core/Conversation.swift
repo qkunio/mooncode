@@ -195,10 +195,20 @@ struct ConversationItem: Decodable, Sendable {
     }
 
     mutating func append(_ delta: String, to field: ConversationDeltaField) {
+        guard !delta.isEmpty else { return }
         switch field {
-        case .text: text = (text ?? "") + delta
-        case .inputText: inputText = (inputText ?? "") + delta
-        case .output: output = .string((output?.stringValue ?? "") + delta)
+        case .text:
+            if text != nil { text!.append(delta) } else { text = delta }
+        case .inputText:
+            if inputText != nil { inputText!.append(delta) } else { inputText = delta }
+        case .output:
+            if case var .string(existing)? = output {
+                output = nil
+                existing.append(delta)
+                output = .string(existing)
+            } else {
+                output = .string(delta)
+            }
         }
     }
 }
@@ -361,6 +371,19 @@ enum ConversationWireEvent: Decodable, Sendable {
     }
 }
 
+enum ConversationChange: Sendable, Equatable {
+    case none
+    case itemDelta(turnID: String, itemID: String, field: ConversationDeltaField, delta: String)
+    case turnUpdated(turnID: String)
+    case full
+}
+
+enum TranscriptSyncResult: Sendable, Equatable {
+    case unchanged
+    case textDelta(turnID: String, stepID: String, frameID: String, kind: String, delta: String)
+    case structural(turnID: String?)
+}
+
 struct ConversationState: Sendable {
     private(set) var turns: [ConversationTurn] = []
     private(set) var hasMore = false
@@ -391,16 +414,19 @@ struct ConversationState: Sendable {
         hasMore = page.hasMore
     }
 
-    mutating func apply(_ event: ConversationWireEvent) {
+    @discardableResult
+    mutating func apply(_ event: ConversationWireEvent) -> ConversationChange {
         switch event {
         case let .turns(page):
             replaceLatest(page)
+            return .full
         case let .turnStarted(turn), let .turnEnded(turn):
             upsert(turn)
+            return .turnUpdated(turnID: turn.turnID)
         case let .turnUpdated(turnID, step, retry):
             updateTurn(turnID) { turn in
                 if let step {
-                    if let index = turn.steps.firstIndex(where: { $0.index == step.index }) {
+                    if let index = turn.steps.lastIndex(where: { $0.index == step.index }) {
                         turn.steps[index] = step
                     } else {
                         turn.steps.append(step)
@@ -409,26 +435,72 @@ struct ConversationState: Sendable {
                 }
                 turn.retry = retry
             }
+            return .turnUpdated(turnID: turnID)
         case let .itemStarted(turnID, item), let .itemEnded(turnID, item):
             upsertItem(turnID: turnID, item: item)
+            return .turnUpdated(turnID: turnID)
         case let .itemUpdated(turnID, itemID, patch):
             updateItem(turnID: turnID, itemID: itemID) { $0.apply(patch) }
+            return .turnUpdated(turnID: turnID)
         case let .itemDelta(turnID, itemID, field, delta):
             updateItem(turnID: turnID, itemID: itemID) { $0.append(delta, to: field) }
+            return .itemDelta(turnID: turnID, itemID: itemID, field: field, delta: delta)
         case let .itemRemoved(turnID, itemID):
             updateTurn(turnID) { turn in
                 turn.items?.removeAll { $0.itemID == itemID }
             }
+            return .full
         case let .turnsRemoved(ids):
             let removed = Set(ids)
             turns.removeAll { removed.contains($0.turnID) }
+            return .full
         case .failed, .notice:
-            break
+            return .none
         }
     }
 
+    /// 把本次变更增量同步到 `TranscriptState`，避免每次 delta 重投影全部历史轮次。
+    func sync(to transcript: inout TranscriptState, change: ConversationChange) -> TranscriptSyncResult {
+        switch change {
+        case .none:
+            return .unchanged
+
+        case let .itemDelta(turnID, itemID, .text, delta):
+            if let hit = transcript.appendText(turnID: turnID, frameID: itemID, delta: delta) {
+                return .textDelta(turnID: turnID, stepID: hit.stepID, frameID: itemID, kind: hit.kind, delta: delta)
+            }
+            return syncTurn(turnID, to: &transcript)
+
+        case let .itemDelta(turnID, _, .inputText, _),
+             let .itemDelta(turnID, _, .output, _),
+             let .turnUpdated(turnID):
+            return syncTurn(turnID, to: &transcript)
+
+        case .full:
+            transcript = transcriptState
+            return .structural(turnID: nil)
+        }
+    }
+
+    private func syncTurn(_ turnID: String, to transcript: inout TranscriptState) -> TranscriptSyncResult {
+        guard let turn = turns.last(where: { $0.turnID == turnID }) else {
+            transcript = transcriptState
+            return .structural(turnID: nil)
+        }
+        let converted = Self.transcriptItems(for: turn)
+        transcript.replaceTurnProjection(
+            turnID: turnID,
+            ordinal: turn.ordinal,
+            items: converted.items,
+            attachments: converted.attachments,
+            prompts: converted.prompts
+        )
+        transcript.hasMoreOlder = hasMore
+        return .structural(turnID: turnID)
+    }
+
     private mutating func upsert(_ header: ConversationTurn) {
-        if let index = turns.firstIndex(where: { $0.turnID == header.turnID }) {
+        if let index = turns.lastIndex(where: { $0.turnID == header.turnID }) {
             var next = header
             next.items = turns[index].items
             turns[index] = next
@@ -447,29 +519,36 @@ struct ConversationState: Sendable {
 
     private mutating func upsertItem(turnID: String, item: ConversationItem) {
         updateTurn(turnID) { turn in
-            var items = turn.items ?? []
-            if let index = items.firstIndex(where: { $0.itemID == item.itemID }) {
-                items[index] = item
-            } else {
-                items.append(item)
+            if turn.items == nil {
+                turn.items = [item]
+                return
             }
-            turn.items = items
+            if let index = turn.items!.lastIndex(where: { $0.itemID == item.itemID }) {
+                turn.items![index] = item
+            } else {
+                turn.items!.append(item)
+            }
         }
     }
 
     private mutating func updateItem(
         turnID: String, itemID: String, change: (inout ConversationItem) -> Void
     ) {
-        updateTurn(turnID) { turn in
-            guard var items = turn.items,
-                  let index = items.firstIndex(where: { $0.itemID == itemID }) else { return }
-            change(&items[index])
-            turn.items = items
-        }
+        guard let turnIndex = turns.lastIndex(where: { $0.turnID == turnID }),
+              let itemIndex = turns[turnIndex].items?.lastIndex(where: { $0.itemID == itemID }) else { return }
+        change(&turns[turnIndex].items![itemIndex])
     }
 
     var transcriptState: TranscriptState {
-        TranscriptState(page: transcriptPage)
+        var state = TranscriptState()
+        state.hasMoreOlder = hasMore
+        for turn in turns {
+            let converted = Self.transcriptItems(for: turn)
+            state.items.append(contentsOf: converted.items)
+            for attachment in converted.attachments { state.attachments[attachment.attachmentId] = attachment }
+            for prompt in converted.prompts { state.prompts[prompt.promptId] = prompt }
+        }
+        return state
     }
 
     var transcriptPage: TranscriptPage {

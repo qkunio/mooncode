@@ -433,7 +433,7 @@ enum TranscriptWireEvent: Decodable, Sendable {
 
 // MARK: - 本地状态机（移植 apply.ts）
 
-struct TranscriptState: Sendable {
+struct TranscriptState: Sendable, Equatable {
     var items: [TranscriptItem] = []
     var tasks: [String: TranscriptTask] = [:]
     var interactions: [String: TranscriptInteraction] = [:]
@@ -443,6 +443,22 @@ struct TranscriptState: Sendable {
     var hasMoreOlder = false
     /// 最后应用到的 ops 批次序号，断线续传时放进 `transcript_since`。
     var seq: Int?
+    /// 缓存流式追加目标的已知 UTF-16 长度，避免在非 ASCII 长文本上每次 `append` 都做 O(N) `utf16.count` 扫描。
+    private var cachedUTF16Counts: [String: Int] = [:]
+
+    /// 内部原地修改 `.turn` 时临时占位的零分配值，确保 `TranscriptTurn` 及其字符串缓冲保持唯一 CoW 引用。
+    private static let emptyTurnPlaceholder = TranscriptItem.taskref(TranscriptTaskRef(refId: "", taskId: ""))
+
+    static func == (lhs: TranscriptState, rhs: TranscriptState) -> Bool {
+        lhs.items == rhs.items
+            && lhs.tasks == rhs.tasks
+            && lhs.interactions == rhs.interactions
+            && lhs.attachments == rhs.attachments
+            && lhs.prompts == rhs.prompts
+            && lhs.meta == rhs.meta
+            && lhs.hasMoreOlder == rhs.hasMoreOlder
+            && lhs.seq == rhs.seq
+    }
 
     init() {}
 
@@ -491,6 +507,89 @@ struct TranscriptState: Sendable {
         items.compactMap { if case let .turn(turn) = $0 { turn } else { nil } }
     }
 
+    var firstTurn: TranscriptTurn? {
+        for item in items {
+            if case let .turn(turn) = item { return turn }
+        }
+        return nil
+    }
+
+    var lastTurn: TranscriptTurn? {
+        for item in items.reversed() {
+            if case let .turn(turn) = item { return turn }
+        }
+        return nil
+    }
+
+    /// 读取指定 frame 当前正文的 UTF-8 字节长度，用于旧版 `append` 去重后的真实增量切片。
+    func frameTextUTF8Count(turnID: String, stepID: String, frameID: String) -> Int? {
+        guard let index = turnIndex(turnID), case let .turn(turn) = items[index],
+              let s = turn.steps.lastIndex(where: { $0.stepId == stepID }),
+              let f = turn.steps[s].frames.lastIndex(where: { $0.frameId == frameID })
+        else { return nil }
+        return turn.steps[s].frames[f].text?.utf8.count ?? 0
+    }
+
+    func frameTextSuffix(turnID: String, stepID: String, frameID: String, fromUTF8Offset offset: Int) -> String {
+        guard let index = turnIndex(turnID), case let .turn(turn) = items[index],
+              let s = turn.steps.lastIndex(where: { $0.stepId == stepID }),
+              let f = turn.steps[s].frames.lastIndex(where: { $0.frameId == frameID }),
+              let text = turn.steps[s].frames[f].text,
+              offset < text.utf8.count
+        else { return "" }
+        let start = text.utf8.index(text.utf8.startIndex, offsetBy: offset)
+        return String(text[start...])
+    }
+
+    /// 2.6+ 文本/思考增量快路径：直接向已有 frame 原地追加文本，跳过整轮重投影。
+    mutating func appendText(turnID: String, frameID: String, delta: String) -> (stepID: String, kind: String)? {
+        guard let index = turnIndex(turnID) else { return nil }
+        var matched: (stepID: String, kind: String)?
+        mutateTurn(at: index) { turn in
+            for stepIndex in turn.steps.indices.reversed() {
+                if let frameIndex = turn.steps[stepIndex].frames.lastIndex(where: { $0.frameId == frameID }) {
+                    let kind = turn.steps[stepIndex].frames[frameIndex].kind
+                    let role = turn.steps[stepIndex].frames[frameIndex].role
+                    guard kind == "thinking" || (kind == "text" && role != "user") else { return }
+                    if !delta.isEmpty {
+                        if turn.steps[stepIndex].frames[frameIndex].text != nil {
+                            turn.steps[stepIndex].frames[frameIndex].text!.append(delta)
+                        } else {
+                            turn.steps[stepIndex].frames[frameIndex].text = delta
+                        }
+                    }
+                    matched = (turn.steps[stepIndex].stepId, kind)
+                    return
+                }
+            }
+        }
+        return matched
+    }
+
+    /// 2.6+ 单轮增量同步：只替换对应 turn（及其紧随的压缩标记）切片，其余历史轮次不动。
+    mutating func replaceTurnProjection(
+        turnID: String,
+        ordinal: Int,
+        items replacement: [TranscriptItem],
+        attachments newAttachments: [TranscriptAttachment],
+        prompts newPrompts: [TranscriptPrompt]
+    ) {
+        if let start = turnIndex(turnID) {
+            var end = start + 1
+            while end < items.count {
+                if case .turn = items[end] { break }
+                end += 1
+            }
+            items.replaceSubrange(start..<end, with: replacement)
+        } else {
+            let at = items.firstIndex { if case let .turn(t) = $0 { t.ordinal > ordinal } else { false } }
+            items.insert(contentsOf: replacement, at: at ?? items.endIndex)
+        }
+        for attachment in newAttachments { attachments[attachment.attachmentId] = attachment }
+        for prompt in newPrompts { prompts[prompt.promptId] = prompt }
+        if !cachedUTF16Counts.isEmpty { cachedUTF16Counts.removeAll(keepingCapacity: true) }
+    }
+
     // MARK: apply
 
     /// 应用一条 op。返回 false 表示接不上（append 的 offset 对不齐），调用方要全量重拉。
@@ -519,6 +618,7 @@ struct TranscriptState: Sendable {
                 }
             }
         case let .frameUpsert(turnId, stepId, frame):
+            cachedUTF16Counts.removeValue(forKey: Self.frameCacheKey(turnId: turnId, stepId: stepId, frameId: frame.frameId))
             updateTurn(turnId) { turn in
                 if let index = turn.steps.firstIndex(where: { $0.stepId == stepId }) {
                     if let f = turn.steps[index].frames.firstIndex(where: { $0.frameId == frame.frameId }) {
@@ -546,6 +646,7 @@ struct TranscriptState: Sendable {
                 items.append(item)
             }
         case let .taskUpsert(task):
+            cachedUTF16Counts.removeValue(forKey: Self.taskCacheKey(task.taskId))
             tasks[task.taskId] = task
         case let .interactionUpsert(interaction):
             interactions[interaction.interactionId] = interaction
@@ -565,7 +666,7 @@ struct TranscriptState: Sendable {
     }
 
     private func turnIndex(_ turnId: String) -> Int? {
-        items.firstIndex { if case let .turn(turn) = $0 { turn.turnId == turnId } else { false } }
+        items.lastIndex { if case let .turn(turn) = $0 { turn.turnId == turnId } else { false } }
     }
 
     private mutating func insert(turn: TranscriptTurn) {
@@ -573,10 +674,17 @@ struct TranscriptState: Sendable {
         items.insert(.turn(turn), at: at ?? items.endIndex)
     }
 
+    @discardableResult
+    private mutating func mutateTurn<R>(at index: Int, _ body: (inout TranscriptTurn) -> R) -> R? {
+        guard case var .turn(turn) = items[index] else { return nil }
+        items[index] = Self.emptyTurnPlaceholder
+        defer { items[index] = .turn(turn) }
+        return body(&turn)
+    }
+
     private mutating func updateTurn(_ turnId: String, _ change: (inout TranscriptTurn) -> Void) {
-        if let index = turnIndex(turnId), case var .turn(turn) = items[index] {
-            change(&turn)
-            items[index] = .turn(turn)
+        if let index = turnIndex(turnId) {
+            mutateTurn(at: index, change)
         } else {
             var turn = TranscriptTurn(skeleton: turnId)
             change(&turn)
@@ -584,42 +692,98 @@ struct TranscriptState: Sendable {
         }
     }
 
+    private static func frameCacheKey(turnId: String, stepId: String, frameId: String) -> String {
+        "f:\(turnId):\(stepId):\(frameId)"
+    }
+
+    private static func taskCacheKey(_ taskId: String) -> String {
+        "t:\(taskId)"
+    }
+
     private mutating func applyAppend(target: TranscriptAppendTarget, offset: Int, chunk: String) -> Bool {
         switch target {
         case let .task(taskId):
-            let local = tasks[taskId]?.outputTail ?? ""
-            guard let merged = Self.append(local, offset: offset, chunk: chunk) else { return false }
-            var task = tasks[taskId] ?? TranscriptTask(taskId: taskId, kind: "other", state: "running")
-            task.outputTail = merged
+            let key = Self.taskCacheKey(taskId)
+            var task = tasks.removeValue(forKey: taskId)
+                ?? TranscriptTask(taskId: taskId, kind: "other", state: "running")
+            var tail = task.outputTail ?? ""
+            task.outputTail = nil
+            var knownCount = cachedUTF16Counts[key]
+            let ok = Self.appendInPlace(&tail, knownUTF16Count: &knownCount, offset: offset, chunk: chunk)
+            task.outputTail = tail
             tasks[taskId] = task
-            return true
+            if ok, let knownCount { cachedUTF16Counts[key] = knownCount }
+            return ok
         case let .frame(turnId, stepId, frameId):
-            guard let index = turnIndex(turnId), case var .turn(turn) = items[index],
-                  let s = turn.steps.firstIndex(where: { $0.stepId == stepId }),
-                  let f = turn.steps[s].frames.firstIndex(where: { $0.frameId == frameId })
-            else { return false }
-            var frame = turn.steps[s].frames[f]
-            guard frame.kind == "text" || frame.kind == "thinking" else { return false }
-            guard let merged = Self.append(frame.text ?? "", offset: offset, chunk: chunk) else { return false }
-            frame.text = merged
-            turn.steps[s].frames[f] = frame
-            items[index] = .turn(turn)
-            return true
+            guard let index = turnIndex(turnId) else { return false }
+            let key = Self.frameCacheKey(turnId: turnId, stepId: stepId, frameId: frameId)
+            var knownCount = cachedUTF16Counts[key]
+            let ok = mutateTurn(at: index) { turn in
+                guard let s = turn.steps.lastIndex(where: { $0.stepId == stepId }),
+                      let f = turn.steps[s].frames.lastIndex(where: { $0.frameId == frameId })
+                else { return false }
+                let kind = turn.steps[s].frames[f].kind
+                guard kind == "text" || kind == "thinking" else { return false }
+                if turn.steps[s].frames[f].text == nil {
+                    turn.steps[s].frames[f].text = ""
+                }
+                return Self.appendInPlace(
+                    &turn.steps[s].frames[f].text!,
+                    knownUTF16Count: &knownCount,
+                    offset: offset,
+                    chunk: chunk
+                )
+            } ?? false
+            if ok, let knownCount { cachedUTF16Counts[key] = knownCount }
+            return ok
         }
     }
 
     /// `appendAtOffset`：offset 超出本地长度 = 断档；与已有内容重叠部分必须一致。
-    /// offset 按 JS 字符串（UTF-16）计。
+    /// offset 按 JS 字符串（UTF-16）计。常规尾部追加结合缓存长度走真正 O(chunk) 原地快路径。
     static func append(_ local: String, offset: Int, chunk: String) -> String? {
-        let localUnits = Array(local.utf16)
-        let chunkUnits = Array(chunk.utf16)
-        guard offset <= localUnits.count else { return nil }
-        let overlap = localUnits.count - offset
-        if overlap >= chunkUnits.count {
-            return Array(localUnits[offset ..< offset + chunkUnits.count]) == chunkUnits ? local : nil
+        var result = local
+        guard appendInPlace(&result, offset: offset, chunk: chunk) else { return nil }
+        return result
+    }
+
+    static func appendInPlace(_ local: inout String, offset: Int, chunk: String) -> Bool {
+        var ignored: Int? = nil
+        return appendInPlace(&local, knownUTF16Count: &ignored, offset: offset, chunk: chunk)
+    }
+
+    static func appendInPlace(
+        _ local: inout String,
+        knownUTF16Count: inout Int?,
+        offset: Int,
+        chunk: String
+    ) -> Bool {
+        let localCount = knownUTF16Count ?? local.utf16.count
+        guard offset >= 0, offset <= localCount else { return false }
+        if offset == localCount {
+            if !chunk.isEmpty { local.append(chunk) }
+            knownUTF16Count = localCount + chunk.utf16.count
+            return true
         }
-        guard Array(localUnits[offset...]) == Array(chunkUnits[..<overlap]) else { return nil }
-        return String(decoding: localUnits[..<offset] + chunkUnits, as: UTF16.self)
+        let localUTF16 = local.utf16
+        let start = localUTF16.index(localUTF16.startIndex, offsetBy: offset)
+        let overlapCount = localCount - offset
+        let chunkUTF16 = chunk.utf16
+        if overlapCount >= chunkUTF16.count {
+            let overlapEnd = localUTF16.index(start, offsetBy: chunkUTF16.count)
+            let matched = localUTF16[start..<overlapEnd].elementsEqual(chunkUTF16)
+            if matched { knownUTF16Count = localCount }
+            return matched
+        }
+        let chunkMid = chunkUTF16.index(chunkUTF16.startIndex, offsetBy: overlapCount)
+        guard localUTF16[start...].elementsEqual(chunkUTF16[..<chunkMid]) else { return false }
+        if let scalarAligned = String.Index(chunkMid, within: chunk) {
+            local.append(contentsOf: chunk[scalarAligned...])
+        } else {
+            local = String(decoding: Array(localUTF16[..<start]) + Array(chunkUTF16), as: UTF16.self)
+        }
+        knownUTF16Count = offset + chunkUTF16.count
+        return true
     }
 
     private mutating func mergeMeta(_ patch: JSONValue) {
@@ -645,7 +809,7 @@ struct TranscriptState: Sendable {
     }
 
     private var transcriptLastTurnIsActive: Bool {
-        guard let state = turns.last?.state else { return false }
+        guard let state = lastTurn?.state else { return false }
         return state == "running" || state == "queued"
     }
 

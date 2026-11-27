@@ -194,6 +194,7 @@ private struct ChatContent: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// 输入框的字。切对话时这个视图整个重建，所以每次改动都存进 `AppModel`，回来时从那里取。
     @State private var draft: String
     /// 点了对话里的文件提及，正在预览的文件。
@@ -202,9 +203,18 @@ private struct ChatContent: View {
     @State private var undoTarget: UserEntry?
     /// 停在底部时新内容自动跟随（官方 isFollowing）；往上翻了就不打扰。
     @State private var isFollowing = true
+    @State private var isUserInteracting = false
     /// 首屏历史到了才显示正文，并且只淡入透明度：布局先一次排好，文字不会跟着滑。
     @State private var isRevealed: Bool
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
+    @State private var lastAutoScrollAt: CFTimeInterval = 0
+    @State private var pendingScrollTask: Task<Void, Never>?
+
+    private struct ScrollFollowMetrics: Equatable {
+        let contentHeight: CGFloat
+        let bottomInset: CGFloat
+        let isScrollable: Bool
+    }
 
     init(chat: ChatModel, face: Namespace.ID, initialDraft: String) {
         self.chat = chat
@@ -252,18 +262,32 @@ private struct ChatContent: View {
             .scrollPosition($scrollPosition)
             .scrollDismissesKeyboard(.interactively)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
-            // 键盘弹出（或确认卡片出现）时底部 inset 变大：本来停在底部的话，聊天记录跟着一起往上推，
-            // 在同一个布局事务里滚，和键盘动画同步。
-            .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.bottom } action: { old, new in
-                guard new > old, isFollowing else { return }
-                scrollPosition.scrollTo(edge: .bottom)
+            // 由真实排版后的内容高度与底部 inset 驱动自动跟随：
+            // 仅在折出新行、新块出现或键盘弹出时触发，彻底消除按 token 排队的双倍 GCD 滚动风暴。
+            .onScrollGeometryChange(for: ScrollFollowMetrics.self) { geometry in
+                let contentHeight = ceil(geometry.contentSize.height)
+                let bottomInset = ceil(geometry.contentInsets.bottom)
+                let scrollable = contentHeight + geometry.contentInsets.top + bottomInset > geometry.containerSize.height + 1
+                return ScrollFollowMetrics(contentHeight: contentHeight, bottomInset: bottomInset, isScrollable: scrollable)
+            } action: { old, new in
+                guard isFollowing, !isUserInteracting, new.isScrollable else { return }
+                if new.bottomInset > old.bottomInset {
+                    // 键盘或确认卡片弹出：同一布局事务内同步贴底，和键盘动画齐步走。
+                    scrollPosition.scrollTo(edge: .bottom)
+                } else if new.contentHeight > old.contentHeight {
+                    followContentGrowth(delta: new.contentHeight - old.contentHeight)
+                }
             }
             .onScrollPhaseChange { _, phase, context in
                 switch phase {
                 case .interacting:
-                    // 手指一放上去就停止跟随：回答生成中也能往上翻，不会被新内容拽回底部。
+                    // 手指一放上去就停止跟随并取消待执行的滚底，绝不和用户抢手势。
+                    isUserInteracting = true
                     isFollowing = false
+                    pendingScrollTask?.cancel()
+                    pendingScrollTask = nil
                 case .idle:
+                    isUserInteracting = false
                     // 滑完停在底部附近才恢复跟随。visibleRect 是整个视口、含 composer 盖住的那截，
                     // 贴底时 maxY = 内容高 + 底部 inset；不减掉 inset，往上翻 200 多点松手也会被拽回去。
                     let geometry = context.geometry
@@ -283,9 +307,9 @@ private struct ChatContent: View {
                     )
                 }
             )
-            .onChange(of: chat.contentVersion) { if isFollowing { scrollToBottom(animated: false) } }
             .onChange(of: Self.isAwaitingHistory(chat)) { _, waiting in
                 guard !waiting, !isRevealed else { return }
+                scrollToBottom(animated: false)
                 withAnimation(.easeOut(duration: 0.3)) { isRevealed = true }
             }
             // 后台久了回来：骨架期间藏起正文，重拉完贴底、淡入，和打开会话首屏一样。
@@ -299,12 +323,18 @@ private struct ChatContent: View {
                 }
             }
             // 一轮结束时「工作中」那行换成页脚，高度会变，再贴一次底。
-            .onChange(of: chat.isWorking) { if isFollowing { scrollToBottom() } }
+            .onChange(of: chat.isWorking) {
+                if isFollowing { scrollToBottom(animated: true) }
+            }
             .onChange(of: chat.optimisticPrompts.count) { old, new in
                 // 自己刚发出一条：不管停在哪都回到底部看它。
                 guard new > old else { return }
                 isFollowing = true
-                scrollToBottom()
+                scrollToBottom(animated: true)
+            }
+            .onDisappear {
+                pendingScrollTask?.cancel()
+                pendingScrollTask = nil
             }
         }
         // 用 safeAreaBar 而不是 safeAreaInset：只有前者参与 iOS 26 的滚动边缘效果，
@@ -397,22 +427,33 @@ private struct ChatContent: View {
         !chat.pendingApprovals.isEmpty || !chat.pendingQuestions.isEmpty
     }
 
-    /// 滚到内容真正的末尾（含底部 inset）。内容刚变时新行可能还没排版，
-    /// 所以下一轮主线程滚一次，布局稳定后（约 0.15s）再补一次。
+    /// 内容因流式输出长高时顺滑跟随：
+    /// 正常阅读节奏（单次增高 1~4 行且间隔 ≥ 140ms）用短缓动轻柔滑动；
+    /// 高速突发或首屏尚未显现时直接贴底，避免动画频繁重置导致顿挫。
+    private func followContentGrowth(delta: CGFloat) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let shouldAnimate = isRevealed && !reduceMotion && delta <= 160 && (now - lastAutoScrollAt) >= 0.14
+        lastAutoScrollAt = now
+        if shouldAnimate {
+            withAnimation(.easeOut(duration: 0.16)) {
+                scrollPosition.scrollTo(edge: .bottom)
+            }
+        } else {
+            scrollPosition.scrollTo(edge: .bottom)
+        }
+    }
+
+    /// 显式滚底（发送新消息、轮次结束、重拉完成）：可取消单任务，避免堆积过期回调。
     private func scrollToBottom(animated: Bool = true) {
-        let scroll = {
-            // 排队的这一下执行前手指可能已经放上来了，别把正在往上翻的人拽回去。
-            guard isFollowing else { return }
-            if animated {
+        pendingScrollTask?.cancel()
+        pendingScrollTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled, isFollowing, !isUserInteracting else { return }
+            if animated && !reduceMotion {
                 withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) }
             } else {
                 scrollPosition.scrollTo(edge: .bottom)
             }
-        }
-        DispatchQueue.main.async(execute: scroll)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            guard isFollowing else { return }
-            scrollPosition.scrollTo(edge: .bottom)
         }
     }
 }
