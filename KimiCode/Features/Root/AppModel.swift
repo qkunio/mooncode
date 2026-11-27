@@ -16,6 +16,7 @@ final class AppModel {
     // 侧栏
     private(set) var workspaces: [Workspace] = []
     private(set) var sessions: [SessionSummary] = []
+    @ObservationIgnored private var sessionPool = SessionListPool()
     private(set) var user: KimiUser?
     /// 订阅剩余用量，打开会话右上角 ⋯ 时刷新。
     private(set) var usage: PlanUsage?
@@ -143,7 +144,8 @@ final class AppModel {
         chat?.stop()
         chat = nil
         workspaces = []
-        sessions = []
+        sessionPool.reset()
+        syncSessions()
         models = []
         usage = nil
         endpoint = .remote(deviceID: device.deviceID, name: device.shortName)
@@ -161,7 +163,7 @@ final class AppModel {
 
     /// 一次拉齐侧栏和 composer 需要的东西。
     func refreshDeviceData() async {
-        guard let client else { return }
+        guard let client, let expectedDeviceID = endpoint?.deviceID else { return }
         async let workspaces = client.workspaces()
         async let sessions = client.sessions()
         async let models = client.models()
@@ -169,10 +171,14 @@ final class AppModel {
         async let user = client.userInfo()
 
         do {
-            self.workspaces = try await workspaces.sorted {
+            let loadedWorkspaces = try await workspaces
+            let loadedSessions = try await sessions.items
+            guard endpoint?.deviceID == expectedDeviceID else { return }
+            self.workspaces = loadedWorkspaces.sorted {
                 ($0.lastOpenedAt?.date ?? .distantPast) > ($1.lastOpenedAt?.date ?? .distantPast)
             }
-            self.sessions = try await sessions.items
+            sessionPool.reconcile(fetched: loadedSessions)
+            syncSessions()
             clearError()
         } catch {
             handle(error)
@@ -180,6 +186,7 @@ final class AppModel {
         // 下面几项失败不影响主流程。
         // 电脑上配好的模型全都列出（含第三方 provider）；「Kimi 订阅」组排最前，组内顺序沿用服务端返回的。
         let all = (try? await models) ?? []
+        guard endpoint?.deviceID == expectedDeviceID else { return }
         self.models = all.filter(\.isKimiSubscription) + all.filter { !$0.isKimiSubscription }
         if let defaults = try? await config { apply(defaults) }
         if let value = try? await user { self.user = value }
@@ -227,15 +234,24 @@ final class AppModel {
 
     /// 打开侧栏时刷新：会话状态（忙/待确认）变化最快。
     func refreshSidebar() async {
-        guard let client else { return }
+        guard let client, let expectedDeviceID = endpoint?.deviceID else { return }
         async let sessions = client.sessions()
         async let workspaces = client.workspaces()
-        if let items = try? await sessions.items { self.sessions = items }
-        if let items = try? await workspaces {
+        if let items = try? await sessions.items, endpoint?.deviceID == expectedDeviceID {
+            sessionPool.reconcile(fetched: items)
+            syncSessions()
+        }
+        if let items = try? await workspaces, endpoint?.deviceID == expectedDeviceID {
             self.workspaces = items.sorted {
                 ($0.lastOpenedAt?.date ?? .distantPast) > ($1.lastOpenedAt?.date ?? .distantPast)
             }
             reconcileDraft()
+        }
+    }
+
+    private func syncSessions() {
+        if sessions != sessionPool.sessions {
+            sessions = sessionPool.sessions
         }
     }
 
@@ -295,7 +311,8 @@ final class AppModel {
         guard let client, !trimmed.isEmpty, trimmed != session.displayTitle else { return }
         do {
             let updated = try await client.renameSession(session.id, title: trimmed)
-            if let index = sessions.firstIndex(where: { $0.id == session.id }) { sessions[index] = updated }
+            sessionPool.recordRenamed(updated)
+            syncSessions()
             chat?.replaceSession(updated)
         } catch {
             handle(error)
@@ -307,7 +324,8 @@ final class AppModel {
         guard let client else { return }
         do {
             try await client.deleteSession(session.id)
-            sessions.removeAll { $0.id == session.id }
+            sessionPool.recordRemoved(session.id)
+            syncSessions()
             if chat?.sessionID == session.id {
                 let workspace = workspaces.first { $0.id == session.workspaceID }
                 replaceChat(with: makeChat(session: nil, workspace: workspace))
@@ -329,6 +347,7 @@ final class AppModel {
 
     private func makeChat(session: SessionSummary?, workspace: Workspace?) -> ChatModel? {
         guard let client, let endpoint else { return nil }
+        let deviceID = endpoint.deviceID
         return ChatModel(
             session: session,
             workspace: workspace,
@@ -338,7 +357,19 @@ final class AppModel {
             tokenProvider: tokenProvider,
             liveUpdates: !isDemoMode,
             onSessionCreated: { [weak self] created in
-                self?.sessions.insert(created, at: 0)
+                guard let self, self.endpoint?.deviceID == deviceID else { return }
+                self.sessionPool.recordCreated(created)
+                self.syncSessions()
+            },
+            onSessionEvent: { [weak self] change, summary in
+                guard let self, self.endpoint?.deviceID == deviceID else { return }
+                self.sessionPool.applyLiveEvent(change: change, session: summary)
+                self.syncSessions()
+            },
+            onPromptSent: { [weak self] sessionID, text in
+                guard let self, self.endpoint?.deviceID == deviceID else { return }
+                self.sessionPool.recordPromptSent(sessionID: sessionID, text: text)
+                self.syncSessions()
             },
             onConfigChanged: { [weak self] config in
                 self?.rememberComposerConfig(config)
@@ -393,7 +424,8 @@ final class AppModel {
         reachability = DeviceReachability()
         devices = []
         workspaces = []
-        sessions = []
+        sessionPool.reset()
+        syncSessions()
         user = nil
         usage = nil
         models = []

@@ -9,6 +9,7 @@ struct SessionEventFrame: Decodable, Sendable {
     let epoch: String?
     let volatile: Bool?
     let sessionID: String?
+    let session: SessionSummary?
     let payload: JSONValue?
 
     enum CodingKeys: String, CodingKey {
@@ -23,8 +24,10 @@ struct SessionEventFrame: Decodable, Sendable {
         seq = try? c.decodeIfPresent(Int.self, forKey: .seq)
         epoch = try? c.decodeIfPresent(String.self, forKey: .epoch)
         volatile = try? c.decodeIfPresent(Bool.self, forKey: .volatile)
-        let sessionObj = try? c.decodeIfPresent(JSONValue.self, forKey: .session)
+        session = try? c.decodeIfPresent(SessionSummary.self, forKey: .session)
+        let sessionObj = session == nil ? (try? c.decodeIfPresent(JSONValue.self, forKey: .session)) : nil
         sessionID = (try? c.decodeIfPresent(String.self, forKey: .sessionID))
+            ?? session?.id
             ?? sessionObj?["id"]?.stringValue
         payload = try? c.decodeIfPresent(JSONValue.self, forKey: .payload)
     }

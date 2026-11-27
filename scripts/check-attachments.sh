@@ -7,7 +7,7 @@ trap 'rm -rf "$task_check_dir"' EXIT
 cd "$task_repo_root"
 
 swiftc -swift-version 6 -parse-as-library \
-  KimiCode/Core/{JSONValue,Envelope,Models,Endpoint,Transcript,Conversation,KapClient,KapServicing,DemoClient,EventStream,RefreshScheduler,PreviewStorage,RuntimeFrames}.swift \
+  KimiCode/Core/{JSONValue,Envelope,Models,Endpoint,Transcript,Conversation,KapClient,KapServicing,DemoClient,EventStream,RefreshScheduler,PreviewStorage,RuntimeFrames,SessionListPool}.swift \
   KimiCode/Features/Session/{StreamPipeline,ChatModel,ConversationBuilder}.swift \
   scripts/AttachmentChecks.swift \
   -o "$task_check_dir/attachment-checks"

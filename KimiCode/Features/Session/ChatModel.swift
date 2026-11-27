@@ -109,6 +109,8 @@ final class ChatModel {
     /// 是否开 WS 事件流。体验模式的内存后端没有事件流，一轮还在跑时改成轮询。
     private let liveUpdates: Bool
     private let onSessionCreated: (SessionSummary) -> Void
+    private let onSessionEvent: (String, SessionSummary) -> Void
+    private let onPromptSent: (String, String) -> Void
     private let onConfigChanged: (ComposerConfig) -> Void
 
     /// 草稿刚建成会话、第一条消息还没发出：服务端此时还是默认配置（建会话时不采纳 agent_config），
@@ -188,6 +190,8 @@ final class ChatModel {
         tokenProvider: @escaping @Sendable () async -> String?,
         liveUpdates: Bool,
         onSessionCreated: @escaping (SessionSummary) -> Void,
+        onSessionEvent: @escaping (String, SessionSummary) -> Void = { _, _ in },
+        onPromptSent: @escaping (String, String) -> Void = { _, _ in },
         onConfigChanged: @escaping (ComposerConfig) -> Void
     ) {
         self.session = session
@@ -198,6 +202,8 @@ final class ChatModel {
         self.tokenProvider = tokenProvider
         self.liveUpdates = liveUpdates
         self.onSessionCreated = onSessionCreated
+        self.onSessionEvent = onSessionEvent
+        self.onPromptSent = onPromptSent
         self.onConfigChanged = onConfigChanged
         self.pacer = StreamPacer(liveStream: liveStream)
         self.pacer.onStructuralFlush = { [weak self] in
@@ -751,7 +757,10 @@ final class ChatModel {
                 guard let workspace else {
                     throw KapError.api(code: -1, message: "先在侧栏选一个文件夹。")
                 }
-                let created = try await client.createSession(in: workspace, agentConfig: config.patch)
+                let rawCreated = try await client.createSession(in: workspace, agentConfig: config.patch)
+                let created = rawCreated.workspaceID == nil
+                    ? rawCreated.updating(workspaceID: .some(workspace.id))
+                    : rawCreated
                 holdsLocalConfig = true
                 session = created
                 onSessionCreated(created)
@@ -780,6 +789,7 @@ final class ChatModel {
                 .make(text: optimistic.text, images: images, files: files, config: config.patch),
                 to: sessionID
             )
+            onPromptSent(sessionID, optimistic.text)
             if let index = optimisticPrompts.firstIndex(where: { $0.id == optimistic.id }) {
                 optimisticPrompts[index].promptID = accepted.promptID
                 optimisticPrompts[index].userMessageID = accepted.userMessageID
@@ -976,6 +986,12 @@ final class ChatModel {
             }
 
         case let .event(event):
+            if event.type == "session", let change = event.change, let summary = event.session {
+                if summary.id == sessionID, change == "updated" || change == "created" || change == "restored" {
+                    session = summary
+                }
+                onSessionEvent(change, summary)
+            }
             guard event.sessionID == nil || event.sessionID == sessionID else { return }
             if event.type == "session" || event.type.contains("approval") || event.type.contains("question")
                 || event.type.contains("interaction") || event.type == "event.session.work_changed" {
