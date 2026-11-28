@@ -9,7 +9,9 @@ struct RootView: View {
                 MainView()
                     .task { await model.bootstrap() }
             } else {
-                WelcomeView()
+                NavigationStack {
+                    WelcomeView()
+                }
             }
         }
         .animation(.default, value: model.auth.isSignedIn || model.isDemoMode)

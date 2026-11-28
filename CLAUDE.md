@@ -56,6 +56,12 @@ diff/文件卡片、看子 agent 与 task 面板、终端流）。
 登录后自动连上次那台设备（不在线就取第一台在线的），打开最近文件夹里的新对话草稿。
 不再有单独的「选设备」页面，切设备在侧栏。
 
+iPhone Duo 按可用宽度连续适配：外屏 / compact width 保持上述左侧抽屉；内屏 portrait 的窄 regular width
+使用固定侧栏 + detail 双栏，避免系统 split view 在 669pt 宽度退化成 overlay；内屏 landscape 等宽 regular
+布局使用 `NavigationSplitView`。两种 regular 布局都能收起 / 恢复侧栏。折叠切换不重建 `AppModel`，会话与
+输入草稿保持连续；正文和 composer 在宽窗口中限制为 820pt 阅读宽度。欢迎流程的返回键使用系统 toolbar，
+让 iOS 27.1 自动放入 Duo 的竖向控制区；compact 抽屉提供可访问的「关闭侧栏」按钮。
+
 **每个元素的数据来源（照抄官方网页端的做法，见 `dist-web` bundle）：**
 
 | 元素 | 接口 | 备注 |
@@ -374,7 +380,8 @@ xcodebuild -project KimiCode.xcodeproj -scheme KimiCode -sdk iphonesimulator \
 `KimiCode/zh-Hans.lproj/` 不能删：有它系统才认为 App 支持简体中文，选字菜单、相册 / 文件选择器等系统界面才显示中文（开发语言是 en）。
 
 Xcode 26.2 / iOS 26.2 SDK / Swift 6 / deployment target 26.0。模拟器用临时签名（`CODE_SIGN_IDENTITY = "-"`），
-上真机要在 target 里选自己的 Team。
+上真机要在 target 里选自己的 Team。iPhone Duo 使用 Xcode 27.1+ / iOS 27.1 SDK，并在 Device Hub 设备边框下用
+`Closed` / `Partially Open` / `Open` 验证 compact、折叠区域和 regular 布局。
 
 模拟器里跳过浏览器登录（**仅 DEBUG**；token 不落 Keychain，也**绝不会被刷新** —— 刷新会让服务端轮换它，
 把桌面端 CLI 登出）：

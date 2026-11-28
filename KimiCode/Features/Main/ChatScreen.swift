@@ -2,7 +2,10 @@ import SwiftUI
 
 /// 主页：左上角开侧栏，中间是对话，底部 composer。
 struct ChatScreen: View {
-    let openSidebar: () -> Void
+    let showsSidebarToggle: Bool
+    let isSidebarVisible: Bool
+    let isAccessibilityHidden: Bool
+    let toggleSidebar: () -> Void
 
     @Environment(AppModel.self) private var app
     @Environment(\.openURL) private var openURL
@@ -74,24 +77,30 @@ struct ChatScreen: View {
             Text(app.errorMessage ?? "")
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button(action: openSidebar) {
-                    Label("打开侧栏", image: "mc-menu")
+            if !isAccessibilityHidden {
+                if showsSidebarToggle {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(action: toggleSidebar) {
+                            Label(isSidebarVisible ? "隐藏侧栏" : "打开侧栏", image: "mc-menu")
+                        }
+                    }
                 }
-            }
-            if let chat = app.chat {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    SessionInfoButton(chat: chat)
-                    FilesButton(
-                        client: app.client,
-                        sessionID: chat.sessionID ?? chat.workspace.flatMap { app.sessions(in: $0).first?.id },
-                        title: chat.workspace?.displayName ?? "文件"
-                    ) { entry in
-                        chat.addMention(entry)
+                if let chat = app.chat {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        SessionInfoButton(chat: chat)
+                        FilesButton(
+                            client: app.client,
+                            sessionID: chat.sessionID ?? chat.workspace.flatMap { app.sessions(in: $0).first?.id },
+                            title: chat.workspace?.displayName ?? "文件"
+                        ) { entry in
+                            chat.addMention(entry)
+                        }
                     }
                 }
             }
         }
+        .accessibilityElement(children: isAccessibilityHidden ? .ignore : .contain)
+        .accessibilityHidden(isAccessibilityHidden)
     }
 
     @ViewBuilder
@@ -186,8 +195,7 @@ struct WelcomeHero<Message: View>: View {
             message
                 .font(.title2.weight(.bold))
                 .multilineTextAlignment(.center)
-                // 按屏幕宽度排版（overlay 里给的宽度不可靠，会被挤成一列）。
-                .containerRelativeFrame(.horizontal) { width, _ in width - 48 }
+                .frame(maxWidth: .infinity)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 24)
@@ -257,6 +265,8 @@ private struct ChatContent: View {
                 .padding(.horizontal)
                 .padding(.top, 12)
                 .padding(.bottom, 24)
+                .frame(maxWidth: 820)
+                .frame(maxWidth: .infinity)
             }
             .overlay {
                 // 新对话还没发任何东西：中间放欢迎语。
@@ -367,6 +377,8 @@ private struct ChatContent: View {
                 }
             }
             .padding(.horizontal, 12)
+            .frame(maxWidth: 820)
+            .frame(maxWidth: .infinity)
             .padding(.bottom, 8)
             .onChange(of: draft) { _, text in app.setComposerDraft(text, for: chat) }
         }
