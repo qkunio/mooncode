@@ -293,7 +293,7 @@ struct UserTurnView: View, Equatable {
             .contentShape(.rect(cornerRadius: Self.bubbleRadius, style: .continuous))
             .onTapGesture { toggleActions() }
             .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in
-                let maxWidth = width * 0.88
+                let maxWidth = ChatScreen.readingContentWidth(in: width) * 0.88
                 if entry.text.isEmpty, !entry.attachments.isEmpty, entry.attachments.allSatisfy(\.isImage) {
                     return AttachmentThumbnailLayout.contentWidth(for: entry.attachments.count, in: maxWidth - 32) + 32
                 }
@@ -426,7 +426,7 @@ private struct OptimisticPromptRow: View {
             .userBubble()
             .opacity(prompt.failed ? 0.6 : 1)
             .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in
-                let maxWidth = width * 0.88
+                let maxWidth = ChatScreen.readingContentWidth(in: width) * 0.88
                 let imageOnly = !prompt.attachments.isEmpty && prompt.attachments.allSatisfy {
                     if case .image = $0 { return true }
                     return false

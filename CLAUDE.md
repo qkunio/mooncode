@@ -56,11 +56,13 @@ diff/文件卡片、看子 agent 与 task 面板、终端流）。
 登录后自动连上次那台设备（不在线就取第一台在线的），打开最近文件夹里的新对话草稿。
 不再有单独的「选设备」页面，切设备在侧栏。
 
-iPhone Duo 按可用宽度连续适配：外屏 / compact width 保持上述左侧抽屉；内屏 portrait 的窄 regular width
-使用固定侧栏 + detail 双栏，避免系统 split view 在 669pt 宽度退化成 overlay；内屏 landscape 等宽 regular
-布局使用 `NavigationSplitView`。两种 regular 布局都能收起 / 恢复侧栏。折叠切换不重建 `AppModel`，会话与
-输入草稿保持连续；正文和 composer 在宽窗口中限制为 820pt 阅读宽度。欢迎流程的返回键使用系统 toolbar，
-让 iOS 27.1 自动放入 Duo 的竖向控制区；compact 抽屉提供可访问的「关闭侧栏」按钮。
+iPhone Duo / iPad 等大屏（`horizontalSizeClass == .regular && verticalSizeClass == .regular`）按可用宽度连续适配：
+外屏 / 紧凑尺寸（含 iPhone 横屏）保持上述左侧抽屉；宽屏下可用宽度 `< 720pt`（如 Duo 内屏竖屏 669pt）使用固定侧栏 +
+detail 双栏，避免系统 split view 退化成 overlay；`≥ 720pt` 切换为 `NavigationSplitView`。两种 regular 布局共享同一
+侧栏可见性状态，都能收起 / 恢复侧栏并在显示时刷新侧栏数据；常驻侧栏下设备列表轮询拉长至 20 秒且仅在前台活跃时运行。
+折叠切换不重建 `AppModel`，会话与输入草稿保持连续；正文、用户气泡、骨架屏与 composer 在宽窗口中统一限制在 820pt
+阅读宽度内。欢迎流程的返回键使用系统 toolbar，让 iOS 27.1 自动放入 Duo 的竖向控制区；compact 抽屉提供可访问的
+「关闭侧栏」按钮与遮罩层无障碍关闭操作。
 
 **每个元素的数据来源（照抄官方网页端的做法，见 `dist-web` bundle）：**
 

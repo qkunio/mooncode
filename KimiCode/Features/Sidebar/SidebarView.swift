@@ -7,9 +7,11 @@ struct SidebarView: View {
     let close: () -> Void
     let isVisible: Bool
     let showsCloseButton: Bool
+    var isPersistent = false
 
     @Environment(AppModel.self) private var app
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("kimi.showsDevicesInSidebar") private var showsDevicesInSidebar = true
     @State private var collapsed: Set<String> = []
     @State private var isAddingWorkspace = false
@@ -18,10 +20,15 @@ struct SidebarView: View {
     @State private var renameText = ""
     @State private var deleting: SessionSummary?
 
+    private var shouldPollDevices: Bool {
+        isVisible && showsDevicesInSidebar && scenePhase == .active
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-                .padding(.horizontal, 20)
+                .padding(.leading, 20)
+                .padding(.trailing, showsCloseButton ? 6 : 20)
                 .padding(.top, 8)
 
             if showsDevicesInSidebar {
@@ -71,11 +78,12 @@ struct SidebarView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .task(id: isVisible && showsDevicesInSidebar) {
-            guard isVisible && showsDevicesInSidebar else { return }
+        .task(id: shouldPollDevices) {
+            guard shouldPollDevices else { return }
+            let interval: Duration = isPersistent ? .seconds(20) : .seconds(3)
             await app.refreshDevices(silent: true)
             while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                do { try await Task.sleep(for: interval) } catch { return }
                 await app.refreshDevices(silent: true)
             }
         }
@@ -90,15 +98,18 @@ struct SidebarView: View {
                 .frame(width: 30, height: 20)
             (Text("Moon").foregroundStyle(Palette.kimi) + Text(" Code"))
                 .font(.system(.title2, weight: .black))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
             if showsCloseButton {
                 Spacer(minLength: 8)
                 Button(action: close) {
-                    Label("关闭侧栏", systemImage: "xmark")
-                        .labelStyle(.iconOnly)
+                    MoonIcon("mc-close", size: 16)
+                        .foregroundStyle(.secondary)
                         .frame(width: 44, height: 44)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("关闭侧栏")
             }
         }
         .frame(height: 44)

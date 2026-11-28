@@ -53,6 +53,105 @@ struct WelcomeView: View {
     }
 
     var body: some View {
+        decoratedContent
+            .statusBarHidden(showsSplash)
+            .sensoryFeedback(.impact(weight: .medium), trigger: landed)
+            .sensoryFeedback(.success, trigger: confettiBursts)
+            // 逐字打出时每个字轻震一下，像在敲键盘；换步清零、回到打过的一步时不震
+            .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.6), trigger: revealedCharacters) { old, new in
+                new == old + 1
+            }
+            .animation(.default, value: auth.lastError)
+            .task(id: step) {
+                await runStepTyping()
+            }
+    }
+
+    private var decoratedContent: some View {
+        mainContent
+            .toolbar { navigationToolbar }
+            // 各步骤保持导航栏占位一致，避免切步或开场动效落定时小脸上下跳动。
+            .toolbarVisibility(.visible, for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+            .background { backgroundLayer }
+            .overlay { splashOverlay }
+            .overlay {
+                if showsConfetti {
+                    ConfettiBurst().id(confettiBursts)
+                }
+            }
+    }
+
+    private func runStepTyping() async {
+        if showsSplash { await playSplash() }
+        guard !isTyped else { return }
+        let total = lines.reduce(0) { $0 + $1.count }
+        if reduceMotion {
+            revealedCharacters = total
+            typedSteps.insert(step)
+            return
+        }
+        while revealedCharacters < total {
+            do { try await Task.sleep(for: .milliseconds(55)) } catch { return }
+            revealedCharacters += 1
+            // 「欢迎来到Moon Code！」打完：喷彩条，停一下再打第二行
+            if step == .intro && revealedCharacters == welcome.count {
+                await celebrate()
+            }
+        }
+        withAnimation(.easeIn(duration: 0.3)) { _ = typedSteps.insert(step) }
+    }
+
+    @ToolbarContentBuilder
+    private var navigationToolbar: some ToolbarContent {
+        if step == .terminal || step == .desktop {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    go(to: .choose)
+                } label: {
+                    Label("返回", image: "mc-chevron-left")
+                        .labelStyle(.iconOnly)
+                }
+            }
+        }
+    }
+
+    private var backgroundLayer: some View {
+        ZStack {
+            Color(.systemBackground)
+            LinearGradient(
+                colors: [Palette.kimi.opacity(0.06), .clear, .clear],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+        .ignoresSafeArea()
+    }
+
+    @ViewBuilder
+    private var splashOverlay: some View {
+        if showsSplash {
+            GeometryReader { proxy in
+                let origin = proxy.frame(in: .global).origin
+                // KimiFace 是 24×16 单位、放大 4.5 倍画在 bot 框正中
+                let bot = CGRect(x: faceFrame.midX - 54 - origin.x, y: faceFrame.midY - 36 - origin.y, width: 108, height: 72)
+                let covering = splash == .cover
+                SplashFace(
+                    rect: covering ? CGRect(origin: .zero, size: proxy.size) : bot,
+                    unit: covering ? 14 : 4.5,
+                    cornerRadius: covering ? 0 : 2.3 * 4.5,
+                    eyesShown: eyesShown,
+                    blinking: blinking
+                )
+                .opacity(blueShown ? 1 : 0)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+
+    private var mainContent: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 Spacer(minLength: 32)
@@ -193,82 +292,6 @@ struct WelcomeView: View {
             }
             .padding(.horizontal, 28)
             .frame(width: geometry.size.width, height: geometry.size.height)
-        }
-        .toolbar {
-            if step == .terminal || step == .desktop {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        go(to: .choose)
-                    } label: {
-                        Label("返回", image: "mc-chevron-left")
-                            .labelStyle(.iconOnly)
-                    }
-                }
-            }
-        }
-        .toolbar(step == .terminal || step == .desktop ? .visible : .hidden, for: .navigationBar)
-        .navigationBarTitleDisplayMode(.inline)
-        .background {
-            ZStack {
-                Color(.systemBackground)
-                LinearGradient(
-                    colors: [Palette.kimi.opacity(0.06), .clear, .clear],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-            .ignoresSafeArea()
-        }
-        .overlay {
-            if showsSplash {
-                GeometryReader { proxy in
-                    let origin = proxy.frame(in: .global).origin
-                    // KimiFace 是 24×16 单位、放大 4.5 倍画在 bot 框正中
-                    let bot = CGRect(x: faceFrame.midX - 54 - origin.x, y: faceFrame.midY - 36 - origin.y, width: 108, height: 72)
-                    let covering = splash == .cover
-                    SplashFace(
-                        rect: covering ? CGRect(origin: .zero, size: proxy.size) : bot,
-                        unit: covering ? 14 : 4.5,
-                        cornerRadius: covering ? 0 : 2.3 * 4.5,
-                        eyesShown: eyesShown,
-                        blinking: blinking
-                    )
-                    .opacity(blueShown ? 1 : 0)
-                }
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            }
-        }
-        .overlay {
-            if showsConfetti {
-                ConfettiBurst().id(confettiBursts)
-            }
-        }
-        .statusBarHidden(showsSplash)
-        .sensoryFeedback(.impact(weight: .medium), trigger: landed)
-        .sensoryFeedback(.success, trigger: confettiBursts)
-        // 逐字打出时每个字轻震一下，像在敲键盘；换步清零、回到打过的一步时不震
-        .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.6), trigger: revealedCharacters) { old, new in new == old + 1 }
-        .animation(.default, value: auth.lastError)
-        .task(id: step) {
-            if showsSplash { await playSplash() }
-            guard !isTyped else { return }
-            let total = lines.reduce(0) { $0 + $1.count }
-            if reduceMotion {
-                revealedCharacters = total
-                typedSteps.insert(step)
-                return
-            }
-            while revealedCharacters < total {
-                do { try await Task.sleep(for: .milliseconds(55)) } catch { return }
-                revealedCharacters += 1
-                // 「欢迎来到Moon Code！」打完：喷彩条，停一下再打第二行
-                if step == .intro && revealedCharacters == welcome.count {
-                    await celebrate()
-                }
-            }
-            withAnimation(.easeIn(duration: 0.3)) { _ = typedSteps.insert(step) }
         }
     }
 

@@ -2,6 +2,14 @@ import SwiftUI
 
 /// 主页：左上角开侧栏，中间是对话，底部 composer。
 struct ChatScreen: View {
+    /// 宽窗口下正文与 composer 的最大阅读列宽（含左右 16pt 内边距）。
+    static let readingColumnMaxWidth: CGFloat = 820
+
+    /// 供内部 `containerRelativeFrame` 计算基准宽度：窄屏沿用容器宽度，宽屏钳制在阅读列内容宽度内。
+    static func readingContentWidth(in containerWidth: CGFloat) -> CGFloat {
+        min(containerWidth, readingColumnMaxWidth - 32)
+    }
+
     let showsSidebarToggle: Bool
     let isSidebarVisible: Bool
     let isAccessibilityHidden: Bool
@@ -77,25 +85,26 @@ struct ChatScreen: View {
             Text(app.errorMessage ?? "")
         }
         .toolbar {
-            if !isAccessibilityHidden {
-                if showsSidebarToggle {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button(action: toggleSidebar) {
-                            Label(isSidebarVisible ? "隐藏侧栏" : "打开侧栏", image: "mc-menu")
-                        }
+            if showsSidebarToggle {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: toggleSidebar) {
+                        Label(isSidebarVisible ? "隐藏侧栏" : "打开侧栏", image: "mc-menu")
                     }
+                    .accessibilityHidden(isAccessibilityHidden)
                 }
-                if let chat = app.chat {
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        SessionInfoButton(chat: chat)
-                        FilesButton(
-                            client: app.client,
-                            sessionID: chat.sessionID ?? chat.workspace.flatMap { app.sessions(in: $0).first?.id },
-                            title: chat.workspace?.displayName ?? "文件"
-                        ) { entry in
-                            chat.addMention(entry)
-                        }
+            }
+            if let chat = app.chat {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    SessionInfoButton(chat: chat)
+                        .accessibilityHidden(isAccessibilityHidden)
+                    FilesButton(
+                        client: app.client,
+                        sessionID: chat.sessionID ?? chat.workspace.flatMap { app.sessions(in: $0).first?.id },
+                        title: chat.workspace?.displayName ?? "文件"
+                    ) { entry in
+                        chat.addMention(entry)
                     }
+                    .accessibilityHidden(isAccessibilityHidden)
                 }
             }
         }
@@ -265,7 +274,7 @@ private struct ChatContent: View {
                 .padding(.horizontal)
                 .padding(.top, 12)
                 .padding(.bottom, 24)
-                .frame(maxWidth: 820)
+                .frame(maxWidth: ChatScreen.readingColumnMaxWidth)
                 .frame(maxWidth: .infinity)
             }
             .overlay {
@@ -377,7 +386,7 @@ private struct ChatContent: View {
                 }
             }
             .padding(.horizontal, 12)
-            .frame(maxWidth: 820)
+            .frame(maxWidth: ChatScreen.readingColumnMaxWidth)
             .frame(maxWidth: .infinity)
             .padding(.bottom, 8)
             .onChange(of: draft) { _, text in app.setComposerDraft(text, for: chat) }
@@ -484,16 +493,22 @@ private struct ChatSkeleton: View {
         VStack(alignment: .leading, spacing: 0) {
             // 用户气泡（胶囊）。
             SkeletonBar(height: 36)
-                .containerRelativeFrame(.horizontal) { width, _ in min(width * 0.275, 110) }
+                .containerRelativeFrame(.horizontal) { width, _ in
+                    min(ChatScreen.readingContentWidth(in: width) * 0.275, 110)
+                }
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.vertical, 10)
             // 助手正文三行。
             VStack(alignment: .leading, spacing: 12) {
                 SkeletonBar(height: 15, fill: Color(.systemGray6))
                 SkeletonBar(height: 15, fill: Color(.systemGray6))
-                    .containerRelativeFrame(.horizontal) { width, _ in width * 0.8 }
+                    .containerRelativeFrame(.horizontal) { width, _ in
+                        ChatScreen.readingContentWidth(in: width) * 0.8
+                    }
                 SkeletonBar(height: 15, fill: Color(.systemGray6))
-                    .containerRelativeFrame(.horizontal) { width, _ in width * 0.45 }
+                    .containerRelativeFrame(.horizontal) { width, _ in
+                        ChatScreen.readingContentWidth(in: width) * 0.45
+                    }
             }
             .padding(.vertical, 10)
         }

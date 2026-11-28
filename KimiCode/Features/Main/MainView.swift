@@ -7,31 +7,49 @@ import SwiftUI
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var isSidebarOpen = false
     @State private var dragTranslation: CGFloat = 0
     @State private var isDraggingSidebar = false
-    @State private var columnVisibility = NavigationSplitViewVisibility.doubleColumn
-    @State private var isNarrowSidebarVisible = true
+    /// 两种 regular 布局共享的侧栏可见性，横竖屏跨越 720pt 阈值时保持用户选择不跳变。
+    @State private var isRegularSidebarVisible = true
     @State private var isShowingUpdateNotice = false
+
+    /// 仅在双维度均为 regular 时（如 iPhone Duo 展开内屏、iPad）启用双栏/分栏；
+    /// iPhone Plus / Pro Max 横屏高度紧凑（verticalSizeClass == .compact）继续保持抽屉。
+    private var usesRegularLayout: Bool {
+        horizontalSizeClass == .regular && verticalSizeClass == .regular
+    }
+
+    private var isSidebarCurrentlyVisible: Bool {
+        usesRegularLayout ? isRegularSidebarVisible : isSidebarOpen
+    }
+
+    private var splitColumnVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { isRegularSidebarVisible ? .doubleColumn : .detailOnly },
+            set: { isRegularSidebarVisible = ($0 != .detailOnly) }
+        )
+    }
 
     var body: some View {
         Group {
-            if horizontalSizeClass == .regular {
+            if usesRegularLayout {
                 regularLayout
             } else {
                 compactLayout
             }
         }
-        .onChange(of: horizontalSizeClass) { _, sizeClass in
+        .onChange(of: usesRegularLayout) { _, regular in
             isSidebarOpen = false
             dragTranslation = 0
             isDraggingSidebar = false
-            if sizeClass == .regular {
-                columnVisibility = .doubleColumn
+            if regular {
+                isRegularSidebarVisible = true
             }
         }
-        .onChange(of: isSidebarOpen) { _, open in
-            if open { Task { await model.refreshSidebar() } }
+        .onChange(of: isSidebarCurrentlyVisible) { _, visible in
+            if visible { Task { await model.refreshSidebar() } }
         }
         .task {
             guard !model.isDemoMode, AppUpdateNotice.shouldPresent() else { return }
@@ -64,11 +82,11 @@ struct MainView: View {
     }
 
     private func narrowRegularLayout(width: CGFloat) -> some View {
-        let sidebarWidth = min(max(width * 0.36, 220), 260)
-        let detailWidth = isNarrowSidebarVisible ? width - sidebarWidth : width
+        let sidebarWidth = min(min(max(width * 0.36, 220), 260), width)
+        let detailWidth = max(0, isRegularSidebarVisible ? width - sidebarWidth : width)
         return HStack(spacing: 0) {
-            if isNarrowSidebarVisible {
-                SidebarView(close: {}, isVisible: true, showsCloseButton: false)
+            if isRegularSidebarVisible {
+                SidebarView(close: {}, isVisible: true, showsCloseButton: false, isPersistent: true)
                     .frame(width: sidebarWidth)
                     .frame(maxHeight: .infinity)
                     .overlay(alignment: .trailing) { Divider() }
@@ -77,7 +95,7 @@ struct MainView: View {
 
             chatNavigation(
                 showsSidebarToggle: true,
-                isSidebarVisible: isNarrowSidebarVisible,
+                isSidebarVisible: isRegularSidebarVisible,
                 isAccessibilityHidden: false,
                 toggleSidebar: toggleNarrowSidebar
             )
@@ -85,17 +103,16 @@ struct MainView: View {
             .frame(maxHeight: .infinity)
             .clipped()
         }
-        .animation(.smooth(duration: 0.25), value: isNarrowSidebarVisible)
     }
 
     private var splitRegularLayout: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(close: {}, isVisible: columnVisibility != .detailOnly, showsCloseButton: false)
+        NavigationSplitView(columnVisibility: splitColumnVisibility) {
+            SidebarView(close: {}, isVisible: isRegularSidebarVisible, showsCloseButton: false, isPersistent: true)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
         } detail: {
             chatNavigation(
                 showsSidebarToggle: false,
-                isSidebarVisible: columnVisibility != .detailOnly,
+                isSidebarVisible: isRegularSidebarVisible,
                 isAccessibilityHidden: false,
                 toggleSidebar: {}
             )
@@ -132,16 +149,23 @@ struct MainView: View {
                     .contentShape(.rect)
                     .onTapGesture { setSidebar(open: false, feedback: true) }
                     .allowsHitTesting(isSidebarOpen)
+                    .accessibilityElement()
+                    .accessibilityLabel("关闭侧栏")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHidden(!isSidebarOpen)
                     .zIndex(1)
 
                 SidebarView(
                     close: { setSidebar(open: false) },
                     isVisible: isSidebarOpen,
-                    showsCloseButton: true
+                    showsCloseButton: true,
+                    isPersistent: false
                 )
                 .frame(width: sidebarWidth)
                 .offset(x: (progress - 1) * (sidebarWidth + leadingInset))
+                .allowsHitTesting(isSidebarOpen)
                 .accessibilityAddTraits(isSidebarOpen ? .isModal : [])
+                .accessibilityHidden(!isSidebarOpen)
                 .zIndex(2)
             }
             .scrollDisabled(isDraggingSidebar)
@@ -179,7 +203,7 @@ struct MainView: View {
 
     private func toggleNarrowSidebar() {
         withAnimation(.smooth(duration: 0.25)) {
-            isNarrowSidebarVisible.toggle()
+            isRegularSidebarVisible.toggle()
         }
     }
 
